@@ -1,0 +1,58 @@
+# --- Secrets & local notes ---
+*.env
+.env
+*.md
+!README.md
+!LICENSE.md
+
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- Packaging / virtualenvs ---
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# --- Editor / OS cruft ---
+.vscode/
+.idea/
+.DS_Store
+._*
+Thumbs.db
+*.swp
+
+# --- Logs ---
+*.log
+*.log.*
+logs/
+
+# --- Experiment outputs & run artifacts ---
+data/
+abtest/
+smoke_test_results/
+scripts/gpu*_run_logs/
+scripts/real_sim_logs/
+outputs/
+runs/
+wandb/
+checkpoints/
+*.ckpt
+*.pt
+*.bin
+*.safetensors
+
+# --- Agent tooling local state ---
+.agents/
+.claude/
+skills-lock.json
