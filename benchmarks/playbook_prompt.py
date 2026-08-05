@@ -47,9 +47,11 @@ def main() -> None:
 
     pb = load_playbook(None if args.empty else args.iteration)
     if args.describe:
+        tags = sorted({e.tag for e in pb.entries})
+        tag_list = ", ".join(tags)
         print(
-            f"[playbook] v{pb.version}, {len(pb.modules)} modules: "
-            f"{', '.join(c.value for c in pb.modules)}",
+            f"[playbook] v{pb.version}, {len(pb.entries)} entries "
+            f"across {len(tags)} tags: {tag_list}",
             file=sys.stderr,
         )
     # No trailing newline: shells capture this with $(...) into an env var.
