@@ -8,18 +8,18 @@ from qwen_agentworld.tools.families import (
     ALL_FAMILIES,
     DEFAULT_HELDOUT_FAMILY,
     DEFAULT_TRAINING_FAMILIES,
-    FAMILY_STATE_HINTS,
     build_registry,
     family_names,
     get_family,
     training_split,
 )
 from qwen_agentworld.tools.family_split import assert_family_isolation
+from qwen_agentworld.tools.state_schema import FAMILY_STATE_SCHEMAS
 
 
 def test_catalog_has_four_named_domains():
     assert set(family_names()) == {"mcp_api", "terminal_ops", "web_research", "code_repo"}
-    assert set(FAMILY_STATE_HINTS) == set(ALL_FAMILIES)
+    assert set(FAMILY_STATE_SCHEMAS) - {"mcp_notes"} == set(ALL_FAMILIES)
 
 
 def test_every_tool_is_tagged_with_its_family():

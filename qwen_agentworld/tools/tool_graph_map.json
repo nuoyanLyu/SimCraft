@@ -1,0 +1,43 @@
+{
+  "_README": [
+    "Where task generation should start, per agent model.",
+    "",
+    "Difficulty is defined relative to the agent (measured pass rate + a fixed",
+    "band), so nothing about a task predicts how hard it will be for a given",
+    "model. But the *node count* of the sampled tool graph does move the whole",
+    "distribution, and that is a per-model property: a stronger agent needs a",
+    "longer chain before the band stops being empty. This file records the",
+    "starting point measured for each model so generation does not have to",
+    "re-derive it, and so adding a model is a data edit rather than a code edit.",
+    "",
+    "Resolution order, most specific first:",
+    "  models[<agent_model>].families[<tool_family>]",
+    "  models[<agent_model>]",
+    "  default",
+    "Model keys are matched case-insensitively against the basename of the",
+    "model id, so '/root/autodl-tmp/models/Qwen3-8B' resolves to 'Qwen3-8B'.",
+    "",
+    "'evidence' is not read by any code. It is there so the next person to",
+    "change a number has to look at what the current one was measured on."
+  ],
+  "default": {
+    "min_nodes": 3,
+    "max_nodes": 3
+  },
+  "models": {
+    "Qwen3-8B": {
+      "min_nodes": 4,
+      "max_nodes": 4,
+      "measured_on": "2026-08-07",
+      "evidence": "mcp_notes, screened bank: gc=3 n=327 mean=0.703, 65% pinned at 1.00, band yield 9%; gc=4 n=65 mean=0.610, 46% pinned at 1.00, band yield 28%. gc=4 was screened at 3 reps (fewer reps pin more), so its advantage is if anything understated. Caveat: all 65 gc=4 tasks are train-split, so this is observational, not a controlled experiment.",
+      "families": {}
+    },
+    "Qwen-AgentWorld-35B-A3B": {
+      "min_nodes": 4,
+      "max_nodes": 4,
+      "measured_on": null,
+      "evidence": "NOT MEASURED. Carried over from Qwen3-8B as a placeholder. This model is the simulator, not an agent, in every run so far; screen before trusting this row.",
+      "families": {}
+    }
+  }
+}

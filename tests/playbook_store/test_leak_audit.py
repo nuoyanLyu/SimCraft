@@ -1,10 +1,9 @@
-from qwen_agentworld.core.schemas import ParetoScores, Playbook, PlaybookCategory, PlaybookModule
+from qwen_agentworld.core.schemas import Playbook, PlaybookEntry
 from qwen_agentworld.playbook_store.leak_audit import audit_leakage
 
 
-def make_playbook(content: str) -> Playbook:
-    module = PlaybookModule(category=PlaybookCategory.ERROR_RECOVERY, content=content)
-    return Playbook(modules={PlaybookCategory.ERROR_RECOVERY: module})
+def make_playbook(content: str, tag: str = "error-recovery") -> Playbook:
+    return Playbook(entries=[PlaybookEntry(tag=tag, content=content)])
 
 
 def test_clean_content_has_no_violations():
@@ -23,3 +22,11 @@ def test_case_insensitive_match():
     pb = make_playbook("Retry via SEARCH_DOCS if the first call times out.")
     violations = audit_leakage(pb, forbidden_terms={"search_docs"})
     assert violations
+
+
+def test_a_tool_name_hidden_in_a_tag_is_caught_too():
+    """Tags are free text written by the teacher, so they can name a tool just
+    as easily as the rule body can. Auditing only content would leave the tag
+    as an unwatched leak channel."""
+    pb = make_playbook("Retry once before giving up.", tag="search-docs-retry")
+    assert audit_leakage(pb, forbidden_terms={"search_docs", "search-docs"})

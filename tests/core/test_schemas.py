@@ -5,8 +5,8 @@ from qwen_agentworld.core.schemas import (
     CheckerSpec,
     DifficultyMeta,
     EvidenceScore,
-    PlaybookCategory,
-    PlaybookModule,
+    Playbook,
+    PlaybookEntry,
     Step,
     Task,
     TaskGraph,
@@ -92,8 +92,36 @@ def test_trajectory_accumulates_steps_with_evidence():
     assert traj.steps[0].evidence.confidence == 0.75
 
 
-def test_playbook_module_defaults_are_domain_agnostic():
-    mod = PlaybookModule(category=PlaybookCategory.POSTCONDITION_VERIFICATION, content="Always re-check state after a write.")
-    assert mod.version == 1
-    assert mod.pareto_scores.task_coverage == 0.0
-    assert mod.provenance == []
+def test_playbook_entry_defaults():
+    entry = PlaybookEntry(tag="postcondition-verification", content="Always re-check state after a write.")
+    assert entry.version == 1
+    assert entry.stats.helpful == entry.stats.harmful == 0
+    assert entry.provenance == []
+
+
+def test_tags_are_normalized_so_one_lesson_is_one_group():
+    """The tag vocabulary is invented per call, so the same idea arrives spelled
+    three ways; unnormalized they would render as three separate groups."""
+    variants = ["Schema Grounding", "schema_grounding", "  SCHEMA-grounding "]
+    assert {PlaybookEntry(tag=v, content="x").tag for v in variants} == {"schema-grounding"}
+
+
+def test_an_unusable_tag_falls_back_rather_than_raising():
+    assert PlaybookEntry(tag="!!!", content="x").tag == "general"
+
+
+def test_playbook_groups_entries_by_tag_in_first_appearance_order():
+    pb = Playbook(entries=[
+        PlaybookEntry(tag="b", content="one"),
+        PlaybookEntry(tag="a", content="two"),
+        PlaybookEntry(tag="b", content="three"),
+    ])
+    assert pb.tags() == ["b", "a"]
+    assert [e.content for e in pb.entries_by_tag("b")] == ["one", "three"]
+
+
+def test_playbook_has_no_fixed_set_of_tags():
+    """The point of the redesign: a lesson that fits no predefined category is
+    still representable, because there are no predefined categories."""
+    pb = Playbook(entries=[PlaybookEntry(tag="reuse-ids-returned-by-the-tool", content="x")])
+    assert pb.tags() == ["reuse-ids-returned-by-the-tool"]

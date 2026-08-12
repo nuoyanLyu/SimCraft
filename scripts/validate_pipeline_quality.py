@@ -31,6 +31,7 @@ from qwen_agentworld.core.schemas import (
 )
 from qwen_agentworld.llm_clients.teacher_claude import TeacherClient
 from qwen_agentworld.optimizer.gepa_engine import GEPAEngine
+from qwen_agentworld.optimizer.ops import render_entries
 from qwen_agentworld.optimizer.textgrad_engine import TextGradEngine
 from qwen_agentworld.teacher.checker_synth import synthesize_checker
 from qwen_agentworld.teacher.reflection import diagnose
@@ -92,7 +93,7 @@ def check_task_and_checker_quality(teacher, tools, family_label, complexities):
     for c in complexities:
         graph = sample_task_graph(tools, min_nodes=c, max_nodes=c, rng=random.Random(c))
         nl_prompt, initial_state = instantiate_nl_and_state(teacher, graph, tools)
-        checker = synthesize_checker(teacher, graph, tools, initial_state)
+        checker = synthesize_checker(teacher, graph, tools, initial_state, nl_prompt=nl_prompt)
         print(f"\n--- {family_label}, graph_complexity={c} ---")
         print("nl_prompt:", nl_prompt)
         print("initial_state:", json.dumps(initial_state, ensure_ascii=False))
@@ -142,16 +143,14 @@ def check_optimizer_quality(teacher: TeacherClient, diagnosis: Diagnosis) -> Non
     playbook = Playbook(version=1)
 
     gepa_candidates = GEPAEngine(teacher).propose(playbook, diagnosis)
-    print("\n--- GEPA (single-call mutation) ---")
+    print("\n--- GEPA (single-call edit batch) ---")
     for pb in gepa_candidates:
-        for module in pb.modules.values():
-            print(f"[{module.category.value}]\n{module.content}")
+        print(render_entries(pb, with_ids=True) or "(no entries proposed)")
 
     textgrad_candidates = TextGradEngine(teacher).propose(playbook, diagnosis)
     print("\n--- TextGrad (critique -> edit, two calls) ---")
     for pb in textgrad_candidates:
-        for module in pb.modules.values():
-            print(f"[{module.category.value}]\n{module.content}")
+        print(render_entries(pb, with_ids=True) or "(no entries proposed)")
 
 
 if __name__ == "__main__":

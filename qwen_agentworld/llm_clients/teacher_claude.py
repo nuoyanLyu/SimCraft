@@ -4,12 +4,14 @@ provider — so which model/endpoint answers is a config choice (env vars), not
 a code change in teacher/task_generator.py etc.
 
 Configuration (all via .env / environment, see qwen_agentworld/config.py):
-  TEACHER_MODEL            model id on the relay (default "claude-sonnet-5";
-                           e.g. "deepseek-v4-pro")
+  TEACHER_MODEL            model id on the relay (default "deepseek-v4-pro";
+                           was "claude-sonnet-5" until 2026-07-27)
   TEACHER_BASE_URL         relay base url (default: AUTODL_URL)
   TEACHER_API_KEY          relay api key  (default: AUTODL_API_KEY)
   TEACHER_MIN_OUTPUT_TOKENS  floor applied to every call's max_tokens (default
                            8000)
+  TEACHER_TIMEOUT_SECONDS  per-request timeout (default 300; the base client's
+                           60 is not enough for a reasoning model, see quirk 3)
 
 Two provider quirks are handled here so every task-generation call site stays
 model-agnostic:
@@ -30,6 +32,13 @@ model-agnostic:
    high cap is harmless for them. "How many tokens this model needs to think"
    is a property of the backend, not of business logic, so the floor lives here
    rather than being threaded through every call site.
+
+3. A longer request timeout. Same root cause as quirk 2: the hidden reasoning
+   trace comes before any content, so a task-generation call routinely runs
+   past the base client's 60s default. Every attempt then times out and all
+   three retries burn without a single successful call. Measured against
+   claude-sonnet-5 this never triggered, which is why the 60s default survived
+   until the Teacher was switched to deepseek-v4-pro.
 """
 
 from __future__ import annotations
@@ -39,8 +48,9 @@ from typing import Any
 from qwen_agentworld.config import get_env
 from qwen_agentworld.llm_clients.base import ChatResult, LLMClient
 
-DEFAULT_TEACHER_MODEL = get_env("TEACHER_MODEL", "claude-sonnet-5")
+DEFAULT_TEACHER_MODEL = get_env("TEACHER_MODEL", "deepseek-v4-pro")
 DEFAULT_TEACHER_MIN_OUTPUT_TOKENS = int(get_env("TEACHER_MIN_OUTPUT_TOKENS", "8000"))
+DEFAULT_TEACHER_TIMEOUT_SECONDS = float(get_env("TEACHER_TIMEOUT_SECONDS", "300"))
 
 
 def _fold_system_into_first_user(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -67,6 +77,7 @@ class TeacherClient(LLMClient):
         **kwargs,
     ) -> None:
         self.min_output_tokens = min_output_tokens
+        kwargs.setdefault("timeout", DEFAULT_TEACHER_TIMEOUT_SECONDS)
         super().__init__(
             base_url=get_env("TEACHER_BASE_URL") or get_env("AUTODL_URL", required=True),
             api_key=get_env("TEACHER_API_KEY") or get_env("AUTODL_API_KEY", required=True),

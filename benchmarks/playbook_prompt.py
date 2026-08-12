@@ -26,15 +26,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qwen_agentworld.core.schemas import Playbook
 from qwen_agentworld.simulator_gym.env import _build_playbook_context
+from qwen_agentworld.study.checkpoints import empty_playbook, playbook_from_dict
 
 
 def load_playbook(iteration_file: str | None) -> Playbook:
     if iteration_file is None:
-        return Playbook(version=1)
+        return empty_playbook()
     data = json.loads(Path(iteration_file).read_text())
     # An iteration record stores the post-optimization snapshot; a bare playbook
-    # dump is also accepted so a hand-made playbook can be tested.
-    return Playbook.model_validate(data.get("playbook_after", data))
+    # dump is also accepted so a hand-made playbook can be tested. A checkpoint
+    # in the pre-entry format raises instead of rendering nothing, which would
+    # turn the playbook arm into a second copy of the baseline.
+    return playbook_from_dict(data, source=iteration_file)
 
 
 def main() -> None:
@@ -47,11 +50,9 @@ def main() -> None:
 
     pb = load_playbook(None if args.empty else args.iteration)
     if args.describe:
-        tags = sorted({e.tag for e in pb.entries})
-        tag_list = ", ".join(tags)
         print(
-            f"[playbook] v{pb.version}, {len(pb.entries)} entries "
-            f"across {len(tags)} tags: {tag_list}",
+            f"[playbook] v{pb.version}, {len(pb.entries)} entries, "
+            f"{pb.word_count} words, tags: {', '.join(pb.tags()) or '-'}",
             file=sys.stderr,
         )
     # No trailing newline: shells capture this with $(...) into an env var.

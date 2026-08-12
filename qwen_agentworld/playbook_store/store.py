@@ -9,6 +9,7 @@ convention someone has to remember.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 from qwen_agentworld.core.schemas import Playbook
@@ -21,28 +22,39 @@ class LeakageDetectedError(ValueError):
         super().__init__(f"refusing to write playbook: leaked forbidden terms {violations}")
 
 
-def dominates(a: Playbook, b: Playbook) -> bool:
-    """Standard Pareto dominance over (task_coverage, audit_acceptance, compactness),
-    aggregated across a playbook's modules as the mean per axis. Higher is
-    better on every axis.
+def fingerprint(playbook: Playbook, agent_model: str = "") -> str:
+    """Stable identity of "the agent a measurement was taken against".
+
+    Anything cached per-agent — a screened pass rate above all — has to say
+    which agent, or it silently becomes a claim about a model that no longer
+    exists. Version numbers will not do the job: a rolled-back edit bumps the
+    version without changing a word, and two runs that converge on the same
+    text should be allowed to share measurements. So this hashes the entry
+    text itself, plus the model serving it.
+
+    Entries are sorted by text rather than taken in list order: two playbooks
+    holding the same set of rules are the same artifact as far as the agent
+    reading them is concerned, and keying on insertion history would deny two
+    such runs a shared measurement.
     """
-    a_scores = _mean_scores(a)
-    b_scores = _mean_scores(b)
+    body = "\n".join(sorted(f"{entry.tag}:{entry.content}" for entry in playbook.entries))
+    return hashlib.sha1(f"{agent_model}\n{body}".encode()).hexdigest()[:12]
+
+
+def dominates(a: Playbook, b: Playbook) -> bool:
+    """Standard Pareto dominance over (task_coverage, audit_acceptance,
+    compactness). Higher is better on every axis.
+    """
+    a_scores = _scores(a)
+    b_scores = _scores(b)
     at_least_as_good = all(a_val >= b_val for a_val, b_val in zip(a_scores, b_scores))
     strictly_better = any(a_val > b_val for a_val, b_val in zip(a_scores, b_scores))
     return at_least_as_good and strictly_better
 
 
-def _mean_scores(playbook: Playbook) -> tuple[float, float, float]:
-    modules = list(playbook.modules.values())
-    if not modules:
-        return (0.0, 0.0, 0.0)
-    n = len(modules)
-    return (
-        sum(m.pareto_scores.task_coverage for m in modules) / n,
-        sum(m.pareto_scores.audit_acceptance for m in modules) / n,
-        sum(m.pareto_scores.compactness for m in modules) / n,
-    )
+def _scores(playbook: Playbook) -> tuple[float, float, float]:
+    s = playbook.pareto_scores
+    return (s.task_coverage, s.audit_acceptance, s.compactness)
 
 
 @dataclass
@@ -83,6 +95,18 @@ class PlaybookStore:
     @property
     def frontier(self) -> list[Playbook]:
         return list(self._frontier)
+
+    def record_validation(self, utility: float) -> Playbook:
+        """Attach a held-out validation utility to the current playbook.
+
+        This replaces the last history entry rather than appending a new one:
+        the utility is an *annotation* on a playbook that already exists, not a
+        new version of it, and appending would let one playbook be counted
+        repeatedly by `stop_criterion`'s improvement window.
+        """
+        updated = self.current.model_copy(update={"validation_utility": utility})
+        self._history[-1] = updated
+        return updated
 
     def best_validation_playbook(self) -> Playbook:
         """U7 rollback target: highest validation_utility ever recorded.

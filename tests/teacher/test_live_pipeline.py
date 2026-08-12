@@ -59,7 +59,7 @@ def test_full_teacher_pipeline_on_mcp_domain():
     assert isinstance(nl_prompt, str) and nl_prompt
     assert isinstance(initial_state, dict)
 
-    checker = synthesize_checker(teacher, graph, _MCP_TOOLS, initial_state)
+    checker = synthesize_checker(teacher, graph, _MCP_TOOLS, initial_state, nl_prompt=nl_prompt)
     assert isinstance(checker, CheckerSpec)
     assert checker.executable_predicate
 

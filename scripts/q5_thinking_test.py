@@ -1,11 +1,14 @@
 """Q5: compare Simulator (AgentWorld-35B) next-state prediction quality with
 thinking OFF (our current forced setting) vs ON (the paper/official eval
-setting). Runs against the live server on :8800."""
-import json, re, time
+setting). Runs against whatever scripts/serve_simulator.sh is serving."""
+import json, os, re, time
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8800/v1", api_key="EMPTY")
-MODEL = "Qwen-AgentWorld-35B-A3B"
+client = OpenAI(
+    base_url=os.environ.get("SIMULATOR_BASE_URL", "http://localhost:8000/v1"),
+    api_key=os.environ.get("SIMULATOR_API_KEY", "EMPTY"),
+)
+MODEL = os.environ.get("SIMULATOR_MODEL", "Qwen-AgentWorld-35B-A3B")
 
 SIM_SYS = (
     "You simulate the effect of one tool call on an environment's canonical state. "

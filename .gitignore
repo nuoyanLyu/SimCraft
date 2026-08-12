@@ -41,6 +41,7 @@ logs/
 data/
 abtest/
 smoke_test_results/
+studies/
 scripts/gpu*_run_logs/
 scripts/real_sim_logs/
 outputs/
@@ -76,3 +77,7 @@ skills-lock.json
 # tasks. Reproducible from the teacher, large, and churns constantly.
 task_bank/
 task_bank_schema_v1/
+
+task_bank_pre0729_fixes/
+*.md.bak*
+thr.py

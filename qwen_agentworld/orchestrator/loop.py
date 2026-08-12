@@ -1,8 +1,11 @@
 """The closed loop (data/code-architecture-plan.md §4): probe pass rate ->
 generate a task batch at the resulting difficulty -> roll out in the
-simulator -> evidence-gate every step -> checker-judge the outcome ->
-diagnose accepted trajectories -> optimizer.propose/select -> playbook_store
-update, repeated until `stop_criterion` fires.
+simulator -> (optionally evidence-gate every step) -> checker-judge the
+outcome -> diagnose the trajectory -> optimizer.propose/select ->
+playbook_store update, repeated until `stop_criterion` fires.
+
+The evidence gate is off by default since 2026-08-05; see
+`OrchestratorConfig.use_evidence_gate` for the measurement behind that.
 
 Every external capability (Teacher/Agent/Simulator LLMClient, the optimizer
 engine, the tools list) is passed in rather than constructed here, so U1
@@ -17,19 +20,23 @@ playbooks, not the per-task hot loop — see judge/paired_audit.py.
 
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass
+from collections.abc import Callable
 
-from qwen_agentworld.capability_probe.prober import RollingPassRateTracker, suggest_difficulty_adjustment
+import logging
+from dataclasses import dataclass, field, replace
+
+from qwen_agentworld.capability_probe.prober import DEFAULT_DIFFICULTY_BAND, RollingPassRateTracker
 from qwen_agentworld.core.schemas import Playbook, Task, ToolSpec, Trajectory
 from qwen_agentworld.evidence_gate.adjudication import adjudicate
 from qwen_agentworld.evidence_gate.counterfactual_replay import build_counterfactual_probe
 from qwen_agentworld.evidence_gate.gate import EvidenceGate
-from qwen_agentworld.judge.paired_audit import judge_checker
+from qwen_agentworld.judge.verdict import JudgeConfig, judge_rollout
 from qwen_agentworld.llm_clients.base import LLMClient
 from qwen_agentworld.optimizer.base import PlaybookOptimizer
 from qwen_agentworld.playbook_store.store import PlaybookStore
 from qwen_agentworld.simulator_gym.env import rollout, simulate_next_state
+from qwen_agentworld.tools.graph_map import graph_complexity_for
+from qwen_agentworld.tools.state_schema import StateSchema, get_schema
 from qwen_agentworld.teacher.reflection import diagnose
 from qwen_agentworld.teacher.task_generator import generate_task
 
@@ -41,23 +48,49 @@ class OrchestratorConfig:
     tool_family: str
     tasks_per_iteration: int = 4
     n_agreement_samples: int = 3
-    graph_complexity: int = 2
-    min_graph_complexity: int = 2
-    max_graph_complexity: int = 4
+    # How many tools a generated task's graph strings together. Still not a
+    # per-task difficulty dial — see the note in prober.py — but it does move
+    # the *distribution*, and where it should start is a property of the agent
+    # being trained, so `None` means "look it up for `agent_model` in
+    # tools/tool_graph_map.json". An explicit int overrides the map, for a
+    # deliberate one-off; it is not the way to record a new model's number.
+    graph_complexity: int | None = None
+    agent_model: str | None = None
+    # The curriculum's only knob. Difficulty is not a property of a task; it is
+    # the relationship between a task and the agent reading it, so it is
+    # defined as the measured pass rate and selected for with a fixed
+    # acceptance band. Tasks the agent already passes carry no gradient, and
+    # tasks it never passes may not be learnable at all; what is left in the
+    # band is what it can just barely do. The band does not move, and it does
+    # not have to: as the agent improves, tasks drift up out of the band and
+    # stop being served, so the surviving pool is by definition harder than the
+    # one before it. Difficulty rises without anyone defining what "harder"
+    # means. The cost of this definition, and its only cost, is that the rate
+    # has to be re-measured when the agent changes — see
+    # `TaskBank.set_baseline_pass_rate(screened_by=...)`.
+    difficulty_band: tuple[float, float] = DEFAULT_DIFFICULTY_BAND
     task_generation_attempts: int = 2
+    # Off by default (downgraded 2026-08-05). The gate was built to discard
+    # trajectories whose simulated transitions can't be trusted, but as wired
+    # it is structurally always-pass: the self-consistency leg re-samples the
+    # *same* simulator, so agreement sits at ~1.0 and confidence with it, and
+    # no recorded run has had a step rejected. It therefore filtered nothing
+    # while costing (n_agreement_samples - 1) + 1 extra simulator calls per
+    # step — roughly 3x the rollout's simulator budget — and made every run
+    # slower without changing a single learning decision.
+    #
+    # Turning it on is still meaningful, but only once the agreement leg draws
+    # from a *heterogeneous* source (different temperature/prompt/model);
+    # until then leave it off and treat the gate as an appendix component.
+    use_evidence_gate: bool = False
+    # How a rollout is scored. Defaults to the executable predicate, i.e. the
+    # behaviour every run before 2026-08-07 had. See judge/verdict.py.
+    judge: JudgeConfig = field(default_factory=JudgeConfig)
 
-
-def _adjust_difficulty(tracker: RollingPassRateTracker, config: OrchestratorConfig) -> None:
-    """Curriculum step: nudge `config.graph_complexity` toward the tracker's
-    target pass-rate band using last iteration's recorded outcomes for the
-    bucket at the *current* complexity, before this iteration's tasks are
-    generated at that (possibly adjusted) complexity.
-    """
-    result = tracker.result(config.tool_family, config.graph_complexity)
-    delta = suggest_difficulty_adjustment(result, band=tracker.band)
-    config.graph_complexity = min(
-        config.max_graph_complexity, max(config.min_graph_complexity, config.graph_complexity + delta)
-    )
+    def resolved_graph_complexity(self) -> int:
+        if self.graph_complexity is not None:
+            return self.graph_complexity
+        return graph_complexity_for(self.agent_model, self.tool_family)
 
 
 def score_trajectory(
@@ -66,8 +99,14 @@ def score_trajectory(
     trajectory: Trajectory,
     n_agreement_samples: int = 3,
     adjudicator: LLMClient | None = None,
+    schema: StateSchema | None = None,
 ) -> None:
     """Mutates `trajectory.steps[*].evidence` / `.accepted` in place.
+
+    `schema` must be the same one `rollout` used, or the agreement leg
+    compares unlike states: the recorded `next_state` went through
+    `complete_fields`, so re-simulating without the schema would score the
+    simulator down for a field completion added on its behalf.
 
     `adjudicator` is optional and, when given, should be a *separate*
     LLMClient instance from whichever teacher generated this task/checker
@@ -80,7 +119,7 @@ def score_trajectory(
         raw = step.simulator_raw_output or {}
         prior_state, next_state = raw.get("prior_state", {}), raw.get("next_state", {})
         agreement_samples = [next_state] + [
-            simulate_next_state(simulator, prior_state, step.tool_call)
+            simulate_next_state(simulator, prior_state, step.tool_call, schema)
             for _ in range(max(0, n_agreement_samples - 1))
         ]
 
@@ -88,7 +127,9 @@ def score_trajectory(
         probe = build_counterfactual_probe(prior_state, next_state)
         if probe is not None:
             perturbed_prior_state, invariant_fields = probe
-            counterfactual_output = simulate_next_state(simulator, perturbed_prior_state, step.tool_call)
+            counterfactual_output = simulate_next_state(
+                simulator, perturbed_prior_state, step.tool_call, schema
+            )
 
         evidence = gate.score(
             candidate_output=next_state,
@@ -197,24 +238,41 @@ def _process_task(
     keep processing the rest of the batch (Q8).
     """
     trajectory, final_state = rollout(agent, simulator, task, tools, playbook=playbook_store.current)
-    score_trajectory(gate, simulator, trajectory, config.n_agreement_samples, adjudicator=adjudicator)
+    if config.use_evidence_gate:
+        score_trajectory(
+            gate,
+            simulator,
+            trajectory,
+            config.n_agreement_samples,
+            adjudicator=adjudicator,
+            schema=get_schema(task.tool_family),
+        )
 
-    # Ordered canonical states (initial + post-step) let a step-wise checker
-    # verify reversible tasks whose final state equals the initial one;
-    # end-state checkers ignore the extra argument.
-    states = [task.initial_state] + [
-        (step.simulator_raw_output or {}).get("next_state", {}) for step in trajectory.steps
-    ]
-    checker_passed = judge_checker(task.checker, final_state, states=states)
+    verdict = judge_rollout(task, final_state, trajectory, config.judge)
+    checker_passed = verdict.passed
     tracker.record(task.tool_family, task.difficulty_meta.graph_complexity, checker_passed)
 
-    if not trajectory_evidence_accepted(trajectory):
+    if config.use_evidence_gate and not trajectory_evidence_accepted(trajectory):
         return  # simulator evidence too weak to trust this trajectory for learning
 
-    diagnosis = diagnose(teacher, trajectory, checker_passed)
-    candidates = optimizer.propose(playbook_store.current, diagnosis)
+    # The playbook goes into the diagnosis so the teacher can say *which*
+    # entries the agent followed, helpfully or not. Without it the teacher can
+    # only invent new lessons, never credit or retire existing ones, and the
+    # playbook accumulates guidance nothing can ever falsify.
+    before = playbook_store.current
+    diagnosis = diagnose(teacher, trajectory, checker_passed, playbook=before)
+    candidates = optimizer.propose(before, diagnosis)
     if candidates:
-        playbook_store.update(optimizer.select(candidates))
+        selected = optimizer.select(candidates)
+        playbook_store.update(selected)
+        logger.info(
+            "playbook v%s -> v%s: %d -> %d entries, tags=%s",
+            before.version,
+            selected.version,
+            len(before.entries),
+            len(selected.entries),
+            selected.tags(),
+        )
 
 
 def run_iteration(
@@ -228,22 +286,35 @@ def run_iteration(
     tracker: RollingPassRateTracker,
     config: OrchestratorConfig,
     adjudicator: LLMClient | None = None,
+    task_source: Callable[[int, int, tuple[float, float]], list[Task]] | None = None,
 ) -> list[Task]:
     """Runs one batch of tasks through the full closed loop; mutates
     `playbook_store` and `tracker` in place. `playbook_store` must already be
     seeded (`playbook_store.seed(...)`) before the first call. Returns the
-    tasks generated this iteration, mainly for test/inspection purposes.
-    """
-    _adjust_difficulty(tracker, config)
+    tasks used this iteration, mainly for test/inspection purposes.
 
+    `task_source(graph_complexity, n, difficulty_band)` supplies the batch
+    instead of generating it, e.g. from the task bank's train split. The band
+    is passed rather than read from a closure because it is the curriculum:
+    selecting on measured pass rate is the whole of the difficulty control, so
+    a source that ignores it is not serving a curriculum at all. Returning
+    fewer than `n` tasks is allowed and the shortfall is generated as usual, so
+    a bank that runs dry mid-run degrades instead of stalling.
+    """
     # `sample_task_graph` silently clamps to `len(tools)` if asked for more
     # nodes than the pool has — request no more than that up front so the
-    # task's *actual* difficulty_meta.graph_complexity always lands in the
-    # bucket the curriculum step just aimed for, instead of drifting into a
-    # smaller bucket the tracker never adjusted toward.
-    effective_complexity = min(config.graph_complexity, len(tools))
+    # task's *actual* difficulty_meta.graph_complexity matches the bucket it
+    # gets banked under, instead of drifting into a smaller one.
+    effective_complexity = min(config.resolved_graph_complexity(), len(tools))
 
-    tasks = _generate_tasks_resiliently(teacher, tools, config, effective_complexity)
+    tasks: list[Task] = []
+    if task_source is not None:
+        tasks = list(task_source(effective_complexity, config.tasks_per_iteration, config.difficulty_band))
+        logger.info("task_source supplied %d/%d tasks", len(tasks), config.tasks_per_iteration)
+    if len(tasks) < config.tasks_per_iteration:
+        shortfall = config.tasks_per_iteration - len(tasks)
+        batch_config = replace(config, tasks_per_iteration=shortfall)
+        tasks += _generate_tasks_resiliently(teacher, tools, batch_config, effective_complexity)
 
     for task in tasks:
         try:
