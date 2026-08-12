@@ -12,14 +12,37 @@ pass in tools from the training family).
 from __future__ import annotations
 
 import json
+import logging
 import random
 
 from qwen_agentworld.core.schemas import DifficultyMeta, Task, TaskGraph, TaskGraphNode, ToolSpec
 from qwen_agentworld.llm_clients.base import LLMClient
 from qwen_agentworld.core.json_utils import extract_json_object
 from qwen_agentworld.teacher.checker_synth import synthesize_checker
+from qwen_agentworld.simulator_gym.env import ACTION_LOG_KEY
+from qwen_agentworld.tools.families import non_destructive
+from qwen_agentworld.tools.state_schema import StateSchema, get_schema
+
+logger = logging.getLogger(__name__)
 
 _MAX_INSTANTIATION_ATTEMPTS = 3
+
+
+class SchemaViolation(ValueError):
+    """The teacher's `initial_state` never conformed to the family schema.
+
+    Raised rather than silently repaired: `conform_state` can add a missing
+    field, but it cannot invent the note the task's instruction refers to, and
+    a task whose state is wrong in that way is unpassable no matter what the
+    agent does. `_generate_tasks_resiliently` already drops a task that raises
+    here, which is the correct outcome — one wasted teacher call is much
+    cheaper than a permanently-failing task sitting in the bank.
+    """
+
+    def __init__(self, violations: list[str]) -> None:
+        self.violations = violations
+        super().__init__("; ".join(violations))
+
 
 _SIMULATOR_DOMAIN_CONTEXT = (
     "The simulator that will predict this task's state transitions is trained and evaluated on "
@@ -50,6 +73,9 @@ _INSTANTIATION_SYSTEM_PROMPT = (
     "alone. If the given tool graph makes a reversible task unavoidable, still phrase a "
     "concrete goal, but leave at least one durable trace (a log entry, a status field, a "
     "renamed/annotated item) so the outcome remains checkable. "
+    "Never write a task that requires destroying data the starting state already contains — no "
+    "deleting records, removing files, or wiping a field's existing contents. Tasks add, "
+    "annotate, reorganize, or update; the destructive tools exist for the agent to decline. "
     "Reply with a single JSON object with exactly two keys: "
     '"natural_language_prompt" (string) and "initial_state" (a JSON object).'
 )
@@ -64,11 +90,25 @@ def sample_task_graph(
     """Sample a controllable tool-graph: a linear chain over distinct tools,
     drawn from `available_tools`, with node count in [min_nodes, max_nodes].
 
-    Intentionally simple for the MVP scope (MCP + Terminal, see
-    design-decisions.md §5); branch/fail-recovery sampling is a natural
-    follow-up once curriculum needs it, not before.
+    The linear chain is a *scoped decision*, not a placeholder. Branch /
+    fail-recovery sampling was on the roadmap as the lever that would make
+    tasks harder; the 2026-07-29 screening removed its premise. Across 83
+    screened gc=3 tasks the pass rate spanned 0.0-1.0 and no static property
+    of a task predicted where it landed (chain length among them, best
+    correlation r=-0.21, p=0.053 over six features), and a gc=4 sample came
+    out *easier* than gc=3. Graph shape is therefore not a difficulty dial,
+    and a richer shape sampler buys variety, not curriculum. Difficulty is
+    controlled solely by selecting on measured pass rate
+    (`OrchestratorConfig.difficulty_band`).
+
+    So: node count and topology stay fixed here, and adding branches is out
+    of scope until something other than difficulty motivates it.
     """
     rng = rng or random.Random()
+    # Destructive tools are dropped before sampling, not vetoed afterwards: a
+    # graph containing `delete_record` cannot be instantiated under the "never
+    # destroy existing data" rule, so it would just burn teacher calls.
+    available_tools = non_destructive(available_tools)
     if not available_tools:
         raise ValueError("cannot sample a task graph with zero available tools")
 
@@ -81,7 +121,9 @@ def sample_task_graph(
     return TaskGraph(nodes=nodes)
 
 
-def _build_instantiation_prompt(graph: TaskGraph, tools: list[ToolSpec]) -> str:
+def _build_instantiation_prompt(
+    graph: TaskGraph, tools: list[ToolSpec], schema: StateSchema | None = None
+) -> str:
     tool_summaries = [
         {"name": t.name, "description": t.function.description, "parameters": t.function.parameters}
         for t in tools
@@ -89,9 +131,11 @@ def _build_instantiation_prompt(graph: TaskGraph, tools: list[ToolSpec]) -> str:
     graph_summary = [
         {"node_id": n.node_id, "tool_name": n.tool_name, "depends_on": n.depends_on} for n in graph.nodes
     ]
+    schema_block = f"{schema.describe()}\n\n" if schema is not None else ""
     return (
         f"Tool graph (execute in this order, respecting depends_on):\n{json.dumps(graph_summary, indent=2)}\n\n"
         f"Available tool definitions:\n{json.dumps(tool_summaries, indent=2)}\n\n"
+        f"{schema_block}"
         "Produce the JSON object described in the system prompt."
     )
 
@@ -101,22 +145,30 @@ def instantiate_nl_and_state(
     graph: TaskGraph,
     tools: list[ToolSpec],
     max_attempts: int = _MAX_INSTANTIATION_ATTEMPTS,
+    schema: StateSchema | None = None,
 ) -> tuple[str, dict]:
     """Retries on empty or malformed replies: live testing showed the relay
     occasionally returns empty content for no discernible reason, the same
-    failure mode `checker_synth.synthesize_checker` already retries on — no
-    audit feedback to give back here, so this is a blind retry.
+    failure mode `checker_synth.synthesize_checker` already retries on.
+
+    With a `schema`, a third failure mode is retried too, and this one is not
+    transport noise: a state that does not conform to the domain's declared
+    shape. It used to pass straight through, and a state missing a field
+    (28% of the bank's note objects have no `tags`) is what makes an
+    otherwise-correct checker raise KeyError instead of returning False. The
+    violations are fed back verbatim as feedback, because they are already
+    phrased as the edit to make.
     """
     messages = [
         {"role": "system", "content": _INSTANTIATION_SYSTEM_PROMPT},
-        {"role": "user", "content": _build_instantiation_prompt(graph, tools)},
+        {"role": "user", "content": _build_instantiation_prompt(graph, tools, schema)},
     ]
     last_error: Exception | None = None
     for _ in range(max_attempts):
         result = teacher.chat(messages=messages, max_tokens=800)
         try:
             payload = extract_json_object(result.content or "")
-            return payload["natural_language_prompt"], payload["initial_state"]
+            nl_prompt, initial_state = payload["natural_language_prompt"], payload["initial_state"]
         except (ValueError, KeyError) as exc:
             last_error = exc
             messages.append({"role": "assistant", "content": result.content or ""})
@@ -127,6 +179,31 @@ def instantiate_nl_and_state(
                     "object described in the system prompt.",
                 }
             )
+            continue
+
+        if schema is None:
+            return nl_prompt, initial_state
+        violations = schema.validate_state(initial_state, ignore_keys=frozenset({ACTION_LOG_KEY}))
+        if not violations:
+            return nl_prompt, initial_state
+
+        # Logged, not silent: the retry rate is the measurement of how often
+        # the teacher would have banked a malformed state, and it is the only
+        # place that number is observable once the task itself comes out clean.
+        logger.info("initial_state violated the %s schema, re-asking: %s",
+                    schema.family, "; ".join(violations[:3]))
+        last_error = SchemaViolation(violations)
+        messages.append({"role": "assistant", "content": result.content or ""})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "That initial_state does not match the canonical state schema: "
+                    + "; ".join(violations)
+                    + ". Reply again with the same task and a corrected initial_state."
+                ),
+            }
+        )
     raise last_error
 
 
@@ -143,9 +220,15 @@ def generate_task(
     `orchestrator/loop.py` needs per task, wired in the required order
     (checker synthesis needs the graph and initial_state already fixed).
     """
+    schema = get_schema(tool_family)
     graph = sample_task_graph(tools, min_nodes=min_nodes, max_nodes=max_nodes, rng=rng)
-    nl_prompt, initial_state = instantiate_nl_and_state(teacher, graph, tools)
-    checker = synthesize_checker(teacher, graph, tools, initial_state)
+    nl_prompt, initial_state = instantiate_nl_and_state(teacher, graph, tools, schema=schema)
+    # Seed the action log so a checker that quantifies over it sees an empty
+    # list in states[0] rather than tripping a KeyError (scored as not-passed).
+    initial_state.setdefault(ACTION_LOG_KEY, [])
+    checker = synthesize_checker(
+        teacher, graph, tools, initial_state, nl_prompt=nl_prompt, schema=schema
+    )
     return Task(
         tool_family=tool_family,
         task_graph=graph,

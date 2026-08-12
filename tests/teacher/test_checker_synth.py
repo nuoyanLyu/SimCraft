@@ -44,7 +44,7 @@ def test_synthesize_checker_parses_valid_reply():
             }
         )
     )
-    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": []})
+    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": []}, nl_prompt="Write a note titled Draft.")
     assert checker.executable_predicate == "state.get('notes') and len(state['notes']) > 0"
     assert checker.step_wise_diagnostics is True
     assert checker.step_wise_predicate == "any(len(s.get('notes', [])) > 0 for s in states)"
@@ -61,7 +61,7 @@ def test_synthesize_checker_rejects_nl_leak_from_teacher():
         )
     )
     with pytest.raises(CheckerAuditError):
-        synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": []})
+        synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": []}, nl_prompt="Write a note titled Draft.")
     # exhausted every retry against a teacher that never fixes the leak
     assert teacher.chat.call_count == 4
 
@@ -72,7 +72,7 @@ def test_synthesize_checker_retries_after_audit_rejection_then_succeeds():
         ChatResult(content=json.dumps({"executable_predicate": "isinstance(state['x'], int)", "step_wise_diagnostics": False})),
         ChatResult(content=json.dumps({"executable_predicate": "state['x'] > 0", "step_wise_diagnostics": False})),
     ]
-    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": 1})
+    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": 0}, nl_prompt="Write a note titled Draft.")
     assert checker.executable_predicate == "state['x'] > 0"
     assert teacher.chat.call_count == 2
     # the retry prompt included the audit's own violation message as feedback
@@ -92,7 +92,7 @@ def test_synthesize_checker_retries_after_empty_content_then_succeeds(monkeypatc
         ChatResult(content=""),
         ChatResult(content=json.dumps({"executable_predicate": "state['x'] > 0", "step_wise_diagnostics": False})),
     ]
-    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": 1})
+    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": 0}, nl_prompt="Write a note titled Draft.")
     assert checker.executable_predicate == "state['x'] > 0"
     assert teacher.chat.call_count == 2
     retry_message = teacher.chat.call_args.kwargs["messages"][-1]
@@ -107,7 +107,7 @@ def test_synthesize_checker_retries_after_malformed_json_then_succeeds(monkeypat
         ChatResult(content="here you go: not json at all"),
         ChatResult(content=json.dumps({"executable_predicate": "len(state['notes']) == 0", "step_wise_diagnostics": False})),
     ]
-    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": []})
+    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": [{"title": "Draft"}]}, nl_prompt="Write a note titled Draft.")
     assert checker.executable_predicate == "len(state['notes']) == 0"
     assert teacher.chat.call_count == 2
 
@@ -117,7 +117,7 @@ def test_synthesize_checker_raises_after_exhausting_on_persistent_empty_content(
     teacher = MagicMock()
     teacher.chat.return_value = ChatResult(content="")
     with pytest.raises(CheckerAuditError):
-        synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": 1})
+        synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": 1}, nl_prompt="Write a note titled Draft.")
     assert teacher.chat.call_count == 4
 
 
@@ -128,7 +128,7 @@ def test_synthesize_checker_end_state_only_leaves_step_wise_predicate_none():
             {"executable_predicate": "state.get('status') == 'done'", "step_wise_diagnostics": False}
         )
     )
-    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"status": "new"})
+    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"status": "new"}, nl_prompt="Write a note titled Draft.")
     assert checker.step_wise_diagnostics is False
     assert checker.step_wise_predicate is None
 
@@ -151,7 +151,7 @@ def test_synthesize_checker_retries_when_step_wise_predicate_missing_then_succee
             )
         ),
     ]
-    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": []})
+    checker = synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"notes": []}, nl_prompt="Write a note titled Draft.")
     assert checker.step_wise_predicate is not None
     assert teacher.chat.call_count == 2
 
@@ -164,7 +164,7 @@ def test_synthesize_checker_rejects_tautology_predicate():
         )
     )
     with pytest.raises(CheckerAuditError):
-        synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": None})
+        synthesize_checker(teacher, make_graph(), [make_tool("write_note")], {"x": None}, nl_prompt="Write a note titled Draft.")
 
 
 def test_audit_flags_constant_predicate():
@@ -173,3 +173,39 @@ def test_audit_flags_constant_predicate():
 
 def test_audit_flags_tautology():
     assert audit_no_nl_leak("state['x'] == 'a' or state['x'] != 'a'")
+
+
+def test_synthesize_checker_rejects_predicate_already_true_of_initial_state():
+    """A checker that already holds before the agent acts scores the task
+    passed for doing nothing, so it measures nothing. The teacher gets the
+    violation as feedback and its corrected predicate is accepted.
+    """
+    teacher = MagicMock()
+    teacher.chat.side_effect = [
+        ChatResult(content=json.dumps({"executable_predicate": "len(state['notes']) == 1", "step_wise_diagnostics": False})),
+        ChatResult(content=json.dumps({"executable_predicate": "len(state['notes']) == 2", "step_wise_diagnostics": False})),
+    ]
+    checker = synthesize_checker(
+        teacher, make_graph(), [make_tool("write_note")], {"notes": [{"title": "Draft"}]},
+        nl_prompt="Add a second note titled Recap.",
+    )
+    assert checker.executable_predicate == "len(state['notes']) == 2"
+    retry_message = teacher.chat.call_args.kwargs["messages"][-1]
+    assert "already true of the initial state" in retry_message["content"]
+
+
+def test_checker_prompt_carries_the_task_instruction():
+    """Regression for the 2026-07-28 null A/B: the teacher wrote checkers from
+    the tool graph alone and invented values the instruction never asked for,
+    making 4 of 12 eval tasks unpassable. The instruction must reach the prompt.
+    """
+    teacher = MagicMock()
+    teacher.chat.side_effect = [
+        ChatResult(content=json.dumps({"executable_predicate": "len(state['notes']) == 2", "step_wise_diagnostics": False})),
+    ]
+    synthesize_checker(
+        teacher, make_graph(), [make_tool("write_note")], {"notes": [{"title": "Draft"}]},
+        nl_prompt="Tag the note titled 'Chicken Soup' with 'dinner'.",
+    )
+    user_msg = teacher.chat.call_args.kwargs["messages"][1]["content"]
+    assert "Tag the note titled 'Chicken Soup' with 'dinner'." in user_msg

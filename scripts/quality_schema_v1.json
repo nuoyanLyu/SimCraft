@@ -1,0 +1,248 @@
+{
+  "n": 24,
+  "unpassable": 0,
+  "too_weak": 6,
+  "clean": 18,
+  "rows": [
+    {
+      "task_id": "task_00b8fc01c826",
+      "natural_language_prompt": "Please update the note titled 'Weekly Recap' with the new content: 'Discussed Q3 targets, follow-up with client by Friday'. After that, search for any notes that contain the word 'follow-up' and tag the one you just updated with 'action-item'.",
+      "executable_predicate": "any(n['title'] == 'Weekly Recap' and 'Discussed Q3 targets' in n['content'] and 'follow-up with client by Friday' in n['content'] and n['tags'] == ['action-item'] and not ('Old summary' in n['content']) for n in state['notes']) and any(n['title'] == 'Shopping List' and n['content'] == 'milk, eggs, bread' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Project Ideas' and n['content'] == 'AI-powered note taking app' and n['tags'] == [] for n in state['notes']) and len(state['notes']) == 3 and any(c['tool'] == 'search_notes' and 'follow-up' in c['arguments']['query'] for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_038a03cac9eb",
+      "natural_language_prompt": "Update my 'Meeting Notes' with the new action items: 'Review Q3 budget proposal, schedule follow-up meeting with finance'. Then search for any notes that mention 'budget' to see what's already captured. Finally, create a new note titled 'Budget Related Notes' that lists the titles of the notes you found from that search.",
+      "executable_predicate": "len(state['notes']) == 5 and sorted(n['title'] for n in state['notes']) == sorted(['Meeting Notes', 'Budget Proposal 2025', 'Finance Team Update', 'Project X', 'Budget Related Notes']) and any(n['title'] == 'Meeting Notes' and 'Initial action items: Prepare presentation for client meeting.' in n['content'] and 'Review Q3 budget proposal' in n['content'] and 'schedule follow-up meeting with finance' in n['content'] and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Budget Proposal 2025' and n['content'] == 'Draft budget proposal for Q3 with projected costs.' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Finance Team Update' and n['content'] == 'No budget changes expected this quarter.' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Project X' and n['content'] == 'Requires budget approval before proceeding.' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Budget Related Notes' and n['tags'] == [] and 'Meeting Notes' in n['content'] and 'Budget Proposal 2025' in n['content'] and 'Finance Team Update' in n['content'] and 'Project X' in n['content'] for n in state['notes']) and any(c['tool'] == 'search_notes' and 'budget' in c['arguments'].get('query', '') for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_04af07818341",
+      "natural_language_prompt": "Please tag my note titled \"Project Ideas\" with the tag \"brainstorm\". Then list all my notes. After that, update the content of the note \"Project Ideas\" to \"Build a treehouse\".",
+      "executable_predicate": "len(state['notes']) == 1 and state['notes'][0]['title'] == 'Project Ideas' and state['notes'][0]['content'] == 'Build a treehouse' and state['notes'][0]['tags'] == ['brainstorm'] and any(c['tool'] == 'list_notes' for c in state['_action_log'])",
+      "step_wise_predicate": "any(s for s in states if any(note['title'] == 'Project Ideas' and note['tags'] == ['brainstorm'] and note['content'] == 'Original idea: create a mobile app' for note in s['notes']) and not any(c['tool'] == 'list_notes' for c in s['_action_log'])) and states[0]['notes'] == [{'title': 'Project Ideas', 'content': 'Original idea: create a mobile app', 'tags': []}] and states[0]['_action_log'] == [] and len(states[-1]['notes']) == 1 and states[-1]['notes'][0]['title'] == 'Project Ideas' and states[-1]['notes'][0]['content'] == 'Build a treehouse' and states[-1]['notes'][0]['tags'] == ['brainstorm'] and any(c['tool'] == 'list_notes' for c in states[-1]['_action_log'])",
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_12521d944ef5",
+      "natural_language_prompt": "Could you tag my note 'Recipe - Pancakes' with 'breakfast', then replace its content with the updated recipe that includes blueberries, and finally create a new note titled 'Shopping List' with the ingredients I'll need for it?",
+      "executable_predicate": "len(state['notes']) == 3 and sorted([n['title'] for n in state['notes']]) == ['Recipe - Pancakes', 'Shopping List', 'Workout Plan'] and any(n['title'] == 'Recipe - Pancakes' and n['tags'] == ['breakfast'] and n['content'] != 'Original pancake recipe: flour, milk, eggs, sugar, baking powder.' and 'blueberries' in n['content'] for n in state['notes']) and any(n['title'] == 'Workout Plan' and n['content'] == 'Monday: legs, Tuesday: chest' and n['tags'] == ['fitness'] for n in state['notes']) and any(n['title'] == 'Shopping List' and all(ingredient in n['content'] for ingredient in ['flour', 'milk', 'eggs', 'sugar', 'baking powder', 'blueberries']) for n in state['notes'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": true,
+      "too_weak_reason": "The predicate only checks that the updated recipe content contains 'blueberries' and differs from the original, but does not require it to contain the original ingredients, allowing a trivial replacement like 'blueberries' to satisfy the instruction."
+    },
+    {
+      "task_id": "task_2a520f64bb3e",
+      "natural_language_prompt": "I need you to tag my note called 'Meeting Notes' with the tag 'urgent', then list all my current notes, and finally create a new note titled 'Follow-up' with the content 'Send summary to team'.",
+      "executable_predicate": "sorted(n['title'] for n in state['notes']) == ['Follow-up', 'Meeting Notes', 'Shopping List'] and any(n['title'] == 'Meeting Notes' and n['content'] == 'Discussed Q3 budget and hiring plan.' and n['tags'] == ['urgent'] for n in state['notes']) and any(n['title'] == 'Shopping List' and n['content'] == 'Milk, eggs, bread, avocados.' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Follow-up' and n['content'] == 'Send summary to team' for n in state['notes']) and any(c['tool'] == 'list_notes' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_4d59841349cd",
+      "natural_language_prompt": "Search my notes for anything related to productivity, then create a new note titled \"Productivity Summary\" that synthesizes the key ideas from what you found, and tag it with \"summary\".",
+      "executable_predicate": "all([any(n['title'] == 'Morning routine' and n['content'] == 'wake up early, exercise, plan day' and n['tags'] == [] for n in state['notes']), any(n['title'] == 'Productivity hacks' and n['content'] == 'Pomodoro technique, time blocking, avoid multitasking' and n['tags'] == [] for n in state['notes']), any(n['title'] == 'Grocery list' and n['content'] == 'eggs, milk, bread' and n['tags'] == [] for n in state['notes']), any(n['title'] == 'Productivity book notes' and n['content'] == 'Deep Work by Cal Newport: focus blocks, minimize distractions' and n['tags'] == ['books'] for n in state['notes']), any(n['title'] == 'Productivity Summary' and n['content'] != '' and n['tags'] == ['summary'] for n in state['notes']), len(state['notes']) == 5, any(c['tool'] == 'search_notes' and 'productivity' in c['arguments'].get('query', '') for c in state['_action_log'])])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "The predicate requires exactly what the instruction asks: a search for productivity, creating a note with the specified title, tag, and non-empty content, and leaving other notes unchanged, all of which are achievable.",
+      "too_weak": true,
+      "too_weak_reason": "The predicate only checks that the new note's content is non-empty, not that it synthesizes key ideas from the found productivity notes, so a trivial content like 'hello' would satisfy it."
+    },
+    {
+      "task_id": "task_532cfa5c2ea0",
+      "natural_language_prompt": "I just finished reading 'The Silent Patient'. Please tag my 'Reading List' note with '2025-finished', then list all my note titles so I can see the current set, and finally create a new note called 'Project Hail Mary' with an empty body for now.",
+      "executable_predicate": "any(c['tool'] == 'list_notes' for c in state['_action_log']) and len(state['notes']) == 4 and all(t in [n['title'] for n in state['notes']] for t in ['Reading List', 'Work Notes', 'Ideas', 'Project Hail Mary']) and any(n['title'] == 'Work Notes' and n['content'] == 'Prepare presentation for Q2 review' and n['tags'] == ['work'] for n in state['notes']) and any(n['title'] == 'Ideas' and n['content'] == 'Start a podcast' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Reading List' and n['content'] == 'Books to read: The Silent Patient, The Vanishing Half' and '2025-finished' in n['tags'] for n in state['notes']) and any(n['title'] == 'Project Hail Mary' and n['content'] == '' for n in state['notes'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_57d479fd34e5",
+      "natural_language_prompt": "Create a new note titled 'Project Alpha kickoff' with the content 'Meeting scheduled for Monday 10am'. Then search for notes mentioning 'Monday' and finally show me all my notes.",
+      "executable_predicate": "any(note['title'] == 'Project Alpha kickoff' and note['content'] == 'Meeting scheduled for Monday 10am' for note in state['notes']) and any(c['tool'] == 'search_notes' and 'Monday' in c['arguments'].values() for c in state['_action_log']) and any(c['tool'] == 'list_notes' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_59021d5c0856",
+      "natural_language_prompt": "Please update the note titled 'Project Alpha' with the new content: 'Q3 goals: launch beta, hire two engineers, secure Series A funding.' Then list all current notes so I can see the overview. Finally, tag 'Project Alpha' with 'high-priority'.",
+      "executable_predicate": "len(state['notes']) == 2 and any(n['title'] == 'Project Alpha' and n['content'][:10] == 'Q3 goals: ' and 'launch beta' in n['content'] and 'hire two engineers' in n['content'] and 'secure Series A funding' in n['content'] and n['content'][-1:] == '.' and not ('Q2' in n['content']) and n['tags'] == ['high-priority'] for n in state['notes']) and any(n['title'] == 'Shopping List' and n['content'] == 'Milk, eggs, bread' and n['tags'] == ['personal'] for n in state['notes']) and any(c['tool'] == 'list_notes' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_5dbe5349acfb",
+      "natural_language_prompt": "Please add a reminder to follow up with client X to my meeting notes, then find that note by searching for 'client X' and tag it with 'action-needed'.",
+      "executable_predicate": "any(n['title'] == 'Meeting Notes' and \"client X\" in n['content'] and \"Discussed project timeline and budget.\" in n['content'] and \"action-needed\" in n['tags'] for n in state['notes']) and any(c['tool'] == 'search_notes' and c.get('arguments', {}).get('query') == 'client X' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": true,
+      "too_weak_reason": "The predicate only checks for the substring 'client X' in the content, not that a reminder to follow up was actually added, so an agent could just append 'client X' and pass."
+    },
+    {
+      "task_id": "task_665e491b982b",
+      "natural_language_prompt": "I'm planning a baking day. Can you find all my notes that contain cake recipes and compile them into a new note called 'Cake Recipes'? The note should list the titles of those cake notes. Then tag that new note with 'compilation'.",
+      "executable_predicate": "(any(n['title'] == 'Chocolate Cake' and n['content'] == 'Ingredients: flour, sugar, cocoa powder, eggs, butter, baking powder. Instructions: mix dry, add wet, bake at 350F for 30 min.' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Vanilla Cake' and n['content'] == 'Ingredients: flour, sugar, vanilla extract, eggs, butter, milk. Instructions: cream butter and sugar, add eggs, fold in dry, bake.' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Lemon Cake' and n['content'] == 'Ingredients: flour, sugar, lemon zest, lemon juice, eggs, butter, baking powder. Instructions: zest lemons, cream butter, add eggs, alternate dry and lemon juice, bake.' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Grocery List' and n['content'] == 'milk, eggs, butter, lemons, flour, sugar' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Weekend Plans' and n['content'] == 'Saturday: go hiking, Sunday: watch movie' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Cake Recipes' and all(t in n['content'] for t in ['Chocolate Cake', 'Vanilla Cake', 'Lemon Cake']) and not any(t in n['content'] for t in ['Grocery List', 'Weekend Plans']) and 'compilation' in n['tags'] for n in state['notes']))",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_68890bba835e",
+      "natural_language_prompt": "Please update my 'Shopping List' note with the final versions of items I'm getting: eggs, milk, bread, and coffee. Then, create a new note called 'Meal Plan' with the text: Monday - omelette, Tuesday - sandwiches, Wednesday - salad. After that, search my notes for the word 'coffee' to see if I have it anywhere else.",
+      "executable_predicate": "len(state['notes']) == 2 and any(note['title'] == 'Shopping List' and 'eggs' in note['content'] and 'milk' in note['content'] and 'bread' in note['content'] and 'coffee' in note['content'] and note['tags'] == [] for note in state['notes']) and any(note['title'] == 'Meal Plan' and 'Monday - omelette' in note['content'] and 'Tuesday - sandwiches' in note['content'] and 'Wednesday - salad' in note['content'] and note['tags'] == [] for note in state['notes']) and any(c['tool'] == 'search_notes' and c['arguments'].get('query') == 'coffee' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_699561a51bc5",
+      "natural_language_prompt": "Please tag the note titled \"Meeting Notes\" with \"urgent\". Then search for any notes that contain the word \"report\", and finally show me the current list of all note titles.",
+      "executable_predicate": "any(n['title'] == 'Meeting Notes' and n['content'] == 'Discussed project report and next steps.' and 'urgent' in n['tags'] for n in state['notes']) and all((n['title'] == 'Project Plan' and n['content'] == 'The final report is due next week.' and n['tags'] == []) or (n['title'] == 'Shopping List' and n['content'] == 'Milk, eggs, bread' and n['tags'] == []) for n in state['notes'] if n['title'] != 'Meeting Notes') and any(c['tool'] == 'search_notes' and 'report' in c['arguments'].values() for c in state['_action_log']) and any(c['tool'] == 'list_notes' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_74afe0ac9fc6",
+      "natural_language_prompt": "I'm getting ready for my trip to Paris. Please search my notes for anything related to Paris, then list all my notes, and then create a new note titled 'Trip Summary' that summarizes the key points from the Paris-related notes you found.",
+      "executable_predicate": "len(state['notes']) == 4 and len([n for n in state['notes'] if n['title'] == 'Paris Packing List' and n['content'] == 'Passport, adapter, comfortable shoes' and n['tags'] == []]) == 1 and len([n for n in state['notes'] if n['title'] == 'Meeting Notes' and n['content'] == 'Discuss Q4 budget, not Paris' and n['tags'] == []]) == 1 and len([n for n in state['notes'] if n['title'] == 'Paris Itinerary' and n['content'] == 'Eiffel Tower, Louvre, Seine cruise' and n['tags'] == []]) == 1 and len([n for n in state['notes'] if n['title'] == 'Trip Summary' and n['content'] != '']) == 1 and any(c['tool'] == 'search_notes' and any('Paris' in v for v in c['arguments'].values()) for c in state['_action_log']) and any(c['tool'] == 'list_notes' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": true,
+      "too_weak_reason": "The predicate only requires the 'Trip Summary' note to have non-empty content, not that it summarizes the key points from the Paris-related notes as instructed."
+    },
+    {
+      "task_id": "task_770ad08f7bc9",
+      "natural_language_prompt": "Please add a new note titled 'Weekly Standup Agenda' with the content 'Updates, blockers, budget review'. Then list all my notes so I can see what's there, and finally search for notes that mention 'budget'.",
+      "executable_predicate": "len(state['notes']) == 4 and all(note['title'] in ['Shopping List', 'Project Alpha Kickoff', 'Team Meeting Notes', 'Weekly Standup Agenda'] for note in state['notes']) and all(note['tags'] == [] for note in state['notes']) and any(note['title'] == 'Shopping List' and note['content'] == 'Milk, eggs, bread' for note in state['notes']) and any(note['title'] == 'Project Alpha Kickoff' and note['content'] == 'Agenda: define scope, budget, timeline' for note in state['notes']) and any(note['title'] == 'Team Meeting Notes' and note['content'] == 'Discussed Q3 budget review, action items' for note in state['notes']) and any(note['title'] == 'Weekly Standup Agenda' and note['content'] == 'Updates, blockers, budget review' for note in state['notes']) and any(c['tool'] == 'list_notes' for c in state['_action_log']) and any(c['tool'] == 'search_notes' and c['arguments'].get('query') == 'budget' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_7fecda3d75b2",
+      "natural_language_prompt": "Can you list my notes, find the one titled 'Weekly Standup Notes', add the tag 'reviewed' to it, and then change its content to 'All action items completed'?",
+      "executable_predicate": "any(n['title'] == 'Weekly Standup Notes' and n['content'] == 'All action items completed' and n['tags'] == ['reviewed'] for n in state['notes']) and any(n['title'] == 'Shopping List' and n['content'] == 'Milk, eggs, bread' and n['tags'] == ['groceries'] for n in state['notes']) and any(n['title'] == 'Ideas' and n['content'] == 'New product feature brainstorm' and n['tags'] == [] for n in state['notes']) and any(c['tool'] == 'list_notes' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_841c95dc20f4",
+      "natural_language_prompt": "I need a summary of all my notes related to 'quarterly review'. First search my notes for that phrase, then create a new note titled 'Quarterly Review Summary' that lists the titles of every matching note. After that, list all notes so I can see the full set including the new summary.",
+      "executable_predicate": "len(state['notes']) == 6 and all(any(n == orig for n in state['notes']) for orig in [{'title': 'Project Alpha quarterly review feedback', 'content': 'Collected feedback from stakeholders on Q1 performance.', 'tags': []}, {'title': 'Team meeting 2024-05-10', 'content': 'Discussed quarterly review timeline and deliverables.', 'tags': []}, {'title': 'Budget forecast', 'content': 'Updated numbers for Q3 and Q4.', 'tags': []}, {'title': 'Q1 quarterly review notes', 'content': 'Sales figures and market analysis.', 'tags': []}, {'title': 'Random thoughts', 'content': 'Need to buy milk, call dentist.', 'tags': []}]) and any(n['title'] == 'Quarterly Review Summary' and all(t in n['content'] for t in ['Project Alpha quarterly review feedback', 'Team meeting 2024-05-10', 'Q1 quarterly review notes']) and n['tags'] == [] for n in state['notes'])",
+      "step_wise_predicate": "len(states[-1]['notes']) == 6 and all(any(n == orig for n in states[-1]['notes']) for orig in [{'title': 'Project Alpha quarterly review feedback', 'content': 'Collected feedback from stakeholders on Q1 performance.', 'tags': []}, {'title': 'Team meeting 2024-05-10', 'content': 'Discussed quarterly review timeline and deliverables.', 'tags': []}, {'title': 'Budget forecast', 'content': 'Updated numbers for Q3 and Q4.', 'tags': []}, {'title': 'Q1 quarterly review notes', 'content': 'Sales figures and market analysis.', 'tags': []}, {'title': 'Random thoughts', 'content': 'Need to buy milk, call dentist.', 'tags': []}]) and any(n['title'] == 'Quarterly Review Summary' and all(t in n['content'] for t in ['Project Alpha quarterly review feedback', 'Team meeting 2024-05-10', 'Q1 quarterly review notes']) and n['tags'] == [] for n in states[-1]['notes']) and any(c['tool'] == 'search_notes' and 'quarterly review' in c['arguments'].values() for c in states[-1]['_action_log']) and any(c['tool'] == 'list_notes' for c in states[-1]['_action_log']) and len(states[-1]['_action_log']) > 0 and states[-1]['_action_log'][-1]['tool'] == 'list_notes'",
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_a594f9516d7b",
+      "natural_language_prompt": "Please update the 'Project X Status' note: change its content to 'Current status: development phase, on track.' Then create a new note titled 'Meeting Notes 2025-04-10' with the content 'Discussed Q2 goals. Budget is approved.' Finally, search for 'Q2' to see all notes related to Q2.",
+      "executable_predicate": "len(state['notes']) == 3 and any(note['title'] == 'Project X Status' and note['content'] == 'Current status: development phase, on track.' and note['tags'] == [] for note in state['notes']) and any(note['title'] == 'Q2 Planning' and note['content'] == 'Initial Q2 objectives and timeline.' and note['tags'] == [] for note in state['notes']) and any(note['title'] == 'Meeting Notes 2025-04-10' and note['content'] == 'Discussed Q2 goals. Budget is approved.' and note['tags'] == [] for note in state['notes']) and any(c['tool'] == 'search_notes' and c['arguments'] == {'query': 'Q2'} for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_b5de217144f2",
+      "natural_language_prompt": "Please update the note titled 'Project Ideas' to include the keyword 'priority-a' in its content. Then, search for all notes that contain 'priority-a' and create a new note called 'Priority A Items' that lists the titles of those notes.",
+      "executable_predicate": "len(state['notes']) == 3 and all(note['tags'] == [] for note in state['notes']) and any(note['title'] == 'Project Ideas' and 'priority-a' in note['content'] for note in state['notes']) and any(note['title'] == 'Meeting Notes' and note['content'] == 'Discussed Q3 goals and budget.' for note in state['notes']) and any(note['title'] == 'Priority A Items' and 'Project Ideas' in note['content'] and 'Meeting Notes' not in note['content'] for note in state['notes']) and any(c['tool'] == 'search_notes' and any(v == 'priority-a' for v in c['arguments'].values()) for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": true,
+      "too_weak_reason": "The predicate only checks that the new note contains 'Project Ideas' in its content, not that it lists the titles of all notes containing 'priority-a'."
+    },
+    {
+      "task_id": "task_b7ac047e91f1",
+      "natural_language_prompt": "I need a new note for my workout log. First, create it with the title 'Workout Log' and the text 'Day 1: Rest'. Then, tag it with 'fitness'. Finally, update the note so the content becomes 'Day 1: Rest\nDay 2: Cardio'.",
+      "executable_predicate": "(any(n['title'] == '' and n['content'] == '' and n['tags'] == [] for n in state['notes']) and len([n for n in state['notes'] if n['title'] == 'Workout Log']) == 1 and any(n['title'] == 'Workout Log' and n['content'] == 'Day 1: Rest\\nDay 2: Cardio' and n['tags'] == ['fitness'] for n in state['notes']))",
+      "step_wise_predicate": "(all(any(n['title'] == '' and n['content'] == '' and n['tags'] == [] for n in s['notes']) for s in states) and not any(n['title'] == 'Workout Log' for n in states[0]['notes']) and any(any(n['title'] == 'Workout Log' and n['content'] == 'Day 1: Rest' for n in s['notes']) for s in states) and len([n for n in states[-1]['notes'] if n['title'] == 'Workout Log']) == 1 and any(n['title'] == 'Workout Log' and n['content'] == 'Day 1: Rest\\nDay 2: Cardio' and n['tags'] == ['fitness'] for n in states[-1]['notes']))",
+      "unpassable": false,
+      "unpassable_reason": "The predicate requires the exact final state described in the instruction, including the original empty note and the updated workout log note with specific content and tags, which is reachable by following the steps.",
+      "too_weak": false,
+      "too_weak_reason": "The predicate verifies the exact title, content, tags, and intermediate step (content before update), so a state ignoring the instruction would not satisfy it."
+    },
+    {
+      "task_id": "task_cd663438b636",
+      "natural_language_prompt": "Find the note I wrote about the Q3 budget, tag it as 'reviewed', and then replace its content with the final approved numbers: Marketing $7,000, Operations $4,500, R&D $2,000.",
+      "executable_predicate": "len(state['notes']) == 1 and any(n['title'] == 'Q3 Budget' and n['content'] == 'Marketing $7,000, Operations $4,500, R&D $2,000' and n['tags'] == ['reviewed'] for n in state['notes'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_d240d01feaa7",
+      "natural_language_prompt": "Please create a new note titled \"Grocery List\" with the items I need to buy this week: milk, eggs, bread, and butter. Then search for that note to confirm it was saved, and add a 'shopping' tag to it.",
+      "executable_predicate": "len(state['notes']) == 3 and any(n['title'] == 'Meeting Notes' and n['content'] == 'Discuss Q3 goals and budget timeline.' and n['tags'] == ['work'] for n in state['notes']) and any(n['title'] == 'Ideas' and n['content'] == 'brainstorming vacation destinations' and n['tags'] == [] for n in state['notes']) and any(n['title'] == 'Grocery List' and all(item in n['content'] for item in ['milk', 'eggs', 'bread', 'butter']) and n['tags'] == ['shopping'] for n in state['notes']) and any(c['tool'] == 'search_notes' for c in state['_action_log'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": false,
+      "too_weak_reason": ""
+    },
+    {
+      "task_id": "task_e79bcb76f631",
+      "natural_language_prompt": "I need to organize my notes. Please add the tag 'review' to the note titled 'Project Ideas'. Then, update that same note's content to: 'Brainstorming session outcomes: focus on AI integration, mobile app, and cloud migration. Prioritize by feasibility.' Finally, create a new note called 'Next Steps' with the content: '1. Research AI APIs. 2. Prototype mobile UI. 3. Cost analysis for cloud migration.'",
+      "executable_predicate": "len(state['notes']) == 2 and any(n['title'] == 'Project Ideas' and 'Brainstorming' in n['content'] and 'AI integration' in n['content'] and 'mobile app' in n['content'] and 'cloud migration' in n['content'] and 'Prioritize' in n['content'] and 'feasibility' in n['content'] and sorted(n['tags']) == ['review'] for n in state['notes']) and any(n['title'] == 'Next Steps' and 'Research AI APIs' in n['content'] and 'Prototype mobile UI' in n['content'] and 'Cost analysis' in n['content'] and 'cloud migration' in n['content'] and '1.' in n['content'] and '2.' in n['content'] and '3.' in n['content'] for n in state['notes'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "",
+      "too_weak": true,
+      "too_weak_reason": "The predicate uses substring checks for note content rather than requiring the exact specified text, so a note with only the key phrases but otherwise different wording still passes."
+    },
+    {
+      "task_id": "task_f421962842aa",
+      "natural_language_prompt": "I just switched my car insurance to Geico. My old policy details are in a note called something like \"Insurance\" or \"Policy\". Can you find that note and update it with the new information? The provider is now Geico, the policy number is 123456789, and the expiration date stays the same as whatever I had before.",
+      "executable_predicate": "len(state['notes']) == 4 and all(any(n['title'] == t and n['content'] == c and n['tags'] == tg for n in state['notes']) for t, c, tg in [('Groceries', 'Milk, eggs, bread, spinach, chicken breasts', []), ('Workout Plan', 'Monday: 3 miles + core\\nWednesday: upper body\\nFriday: lower body', ['fitness']), ('Meeting Notes - Project X', 'Discussed timeline and resources. Follow-up next week.', ['work'])]) and any(n['title'] == 'Insurance Policy' and 'Geico' in n['content'] and '123456789' in n['content'] and '2025-06-01' in n['content'] and 'State Farm' not in n['content'] and '987654321' not in n['content'] and n['tags'] == ['important'] for n in state['notes'])",
+      "step_wise_predicate": null,
+      "unpassable": false,
+      "unpassable_reason": "The predicate requires the note to contain the new provider, policy number, and original expiration, without the old details, while leaving other notes unchanged, which is exactly what the instruction asks.",
+      "too_weak": false,
+      "too_weak_reason": "The predicate enforces the exact title, tags, presence of new information, absence of old information, and preservation of all other notes, so even minor deviations from the instruction would fail."
+    }
+  ]
+}

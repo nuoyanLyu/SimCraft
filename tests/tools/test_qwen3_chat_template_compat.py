@@ -2,10 +2,11 @@
 chat template, not just structurally plausible.
 
 This renders against the chat_template.jinja shipped with
-Qwen-AgentWorld-35B-A3B (see /data1/lvnuoyan/llm_model/...), which only
-requires the small template file, not the (still downloading) weights.
-Skips gracefully if that file isn't present, e.g. on a machine without the
-model checkout.
+Qwen-AgentWorld-35B-A3B, which only needs the small template file, not the
+weights. The checkout location is machine-specific, so resolve it from
+$SIMULATOR_MODEL_PATH -- the same variable scripts/serve_simulator.sh reads --
+falling back to that script's default. Skips gracefully if the file isn't
+present, e.g. on a machine without the model checkout.
 """
 
 from __future__ import annotations
@@ -18,7 +19,10 @@ import pytest
 from qwen_agentworld.core.schemas import ToolFunctionSpec, ToolSpec
 from qwen_agentworld.tools.registry import ToolRegistry
 
-CHAT_TEMPLATE_PATH = "/data1/lvnuoyan/llm_model/Qwen-AgentWorld-35B-A3B/chat_template.jinja"
+MODEL_DIR = os.environ.get(
+    "SIMULATOR_MODEL_PATH", "/root/autodl-tmp/models/Qwen-AgentWorld-35B-A3B"
+)
+CHAT_TEMPLATE_PATH = os.path.join(MODEL_DIR, "chat_template.jinja")
 
 pytestmark = pytest.mark.skipif(
     not os.path.exists(CHAT_TEMPLATE_PATH),

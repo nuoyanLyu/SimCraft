@@ -247,7 +247,7 @@ class _RecordingOptimizer(PlaybookOptimizer):
     def propose(self, current: Playbook, diagnosis: Diagnosis) -> list[Playbook]:
         if not diagnosis.step_diagnoses:
             return []
-        return [Playbook(version=current.version + 1, modules=dict(current.modules))]
+        return [Playbook(version=current.version + 1, entries=list(current.entries))]
 
 
 def test_run_iteration_wires_the_full_closed_loop_with_every_role_mocked():
@@ -268,7 +268,7 @@ def test_run_iteration_wires_the_full_closed_loop_with_every_role_mocked():
                             "step_id": "s1",
                             "verdict": "correct",
                             "feedback": "found the doc",
-                            "suggested_category": "schema_grounding",
+                            "suggested_tag": "schema-grounding",
                         }
                     ],
                 }
@@ -345,10 +345,8 @@ def test_run_iteration_clamps_graph_complexity_to_tool_pool_size(monkeypatch):
     playbook_store.seed(Playbook(version=1))
     tracker = RollingPassRateTracker()
     gate = EvidenceGate()
-    # tool pool has only 1 tool, but the curriculum wants graph_complexity=4
-    config = OrchestratorConfig(
-        tool_family="mcp_A", tasks_per_iteration=1, graph_complexity=4, max_graph_complexity=4
-    )
+    # tool pool has only 1 tool, but the config asks for graph_complexity=4
+    config = OrchestratorConfig(tool_family="mcp_A", tasks_per_iteration=1, graph_complexity=4)
 
     run_iteration(
         teacher=teacher,
@@ -435,3 +433,102 @@ def test_run_iteration_isolates_a_task_whose_processing_raises(monkeypatch):
     assert len(tasks) == 2
     assert tracker.all_results() == []  # nothing recorded, both skipped
     assert playbook_store.current.version == 1
+
+
+# --------------------------------------------------------------------------- #
+# evidence gate downgrade (2026-08-05): off by default, opt-in per config
+# --------------------------------------------------------------------------- #
+
+
+def _gate_probe_fixture(monkeypatch):
+    """One generated task, one tool call, one simulator step — enough that the
+    gate's extra simulator traffic is countable and its verdict is decidable.
+    """
+
+    def fake_generate_task(teacher, tools, tool_family, min_nodes, max_nodes):
+        return Task(
+            tool_family=tool_family,
+            task_graph=TaskGraph(nodes=[TaskGraphNode(node_id="n1", tool_name=tools[0].function.name)]),
+            natural_language_prompt="find X",
+            initial_state={"docs": []},
+            checker=CheckerSpec(executable_predicate="state.get('docs') == ['X']"),
+            difficulty_meta=DifficultyMeta(graph_complexity=1),
+        )
+
+    monkeypatch.setattr("qwen_agentworld.orchestrator.loop.generate_task", fake_generate_task)
+
+    teacher = MagicMock()
+    teacher.chat.return_value = ChatResult(
+        content=json.dumps(
+            {
+                "overall_verdict": "success",
+                "summary": "done",
+                "steps": [
+                    {
+                        "step_id": "s1",
+                        "verdict": "correct",
+                        "feedback": "ok",
+                        "suggested_tag": "schema-grounding",
+                    }
+                ],
+            }
+        )
+    )
+    agent = MagicMock()
+    agent.chat.side_effect = [
+        ChatResult(content=None, tool_calls=[ToolCallResult(id="c1", name="search_docs", arguments="{}")]),
+        ChatResult(content="done", tool_calls=[]),
+    ]
+    simulator = MagicMock()
+    simulator.chat.return_value = ChatResult(content=json.dumps({"next_state": {"docs": ["X"]}}))
+
+    playbook_store = PlaybookStore()
+    playbook_store.seed(Playbook(version=1))
+    return teacher, agent, simulator, playbook_store
+
+
+def _run_gate_probe(monkeypatch, **config_kwargs):
+    teacher, agent, simulator, playbook_store = _gate_probe_fixture(monkeypatch)
+    run_iteration(
+        teacher=teacher,
+        agent=agent,
+        simulator=simulator,
+        tools=[tool("search_docs")],
+        playbook_store=playbook_store,
+        optimizer=_RecordingOptimizer(),
+        gate=EvidenceGate(),
+        tracker=RollingPassRateTracker(),
+        config=OrchestratorConfig(tool_family="mcp_A", tasks_per_iteration=1, **config_kwargs),
+    )
+    return simulator.chat.call_count, playbook_store
+
+
+def test_evidence_gate_is_off_by_default_and_costs_no_extra_simulator_calls(monkeypatch):
+    # A one-step rollout needs exactly one simulator call. Anything beyond that
+    # is the gate re-simulating the same transition, which is the cost the
+    # downgrade removes.
+    n_calls, playbook_store = _run_gate_probe(monkeypatch)
+    assert OrchestratorConfig(tool_family="mcp_A").use_evidence_gate is False
+    assert n_calls == 1
+    assert playbook_store.current.version == 2  # learning still happened
+
+
+def test_evidence_gate_when_enabled_resamples_the_simulator(monkeypatch):
+    n_calls, playbook_store = _run_gate_probe(
+        monkeypatch, use_evidence_gate=True, n_agreement_samples=3
+    )
+    # 1 rollout call + 2 agreement re-samples; the counterfactual probe needs an
+    # untouched key to perturb and this state has none, so it does not fire.
+    assert n_calls == 3
+    assert playbook_store.current.version == 2
+
+
+def test_disabled_gate_learns_from_a_trajectory_the_gate_would_have_rejected(monkeypatch):
+    monkeypatch.setattr(
+        "qwen_agentworld.orchestrator.loop.trajectory_evidence_accepted", lambda traj: False
+    )
+    _, playbook_store = _run_gate_probe(monkeypatch)
+    assert playbook_store.current.version == 2
+
+    _, gated_store = _run_gate_probe(monkeypatch, use_evidence_gate=True)
+    assert gated_store.current.version == 1  # rejected, so no optimizer pass

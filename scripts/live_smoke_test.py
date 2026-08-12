@@ -13,7 +13,7 @@ instead of a pass/fail number.
 
 Usage (run from the qwen_agentworld repo root, with the target vLLM server
 already reachable at $AGENT_URL):
-    AGENT_URL=http://localhost:8501/v1 AGENT_MODEL=Qwen3-14B \\
+    AGENT_BASE_URL=http://localhost:8001/v1 AGENT_MODEL=Qwen3-8B \\
         ~/anaconda3/envs/simcraft/bin/python scripts/live_smoke_test.py \\
         --iterations 2 --tasks-per-iteration 2 --output-dir smoke_test_results/run1
 """
@@ -34,12 +34,16 @@ from qwen_agentworld.capability_probe.prober import RollingPassRateTracker
 from qwen_agentworld.core.schemas import ToolFunctionSpec, ToolSpec
 from qwen_agentworld.evidence_gate.gate import EvidenceGate
 from qwen_agentworld.judge.paired_audit import judge_checker
-from qwen_agentworld.llm_clients.agent_qwen import AgentClient
+from qwen_agentworld.llm_clients.agent_qwen3 import AgentClient
 from qwen_agentworld.llm_clients.simulator_temp_claude import TemporarySimulatorClient
 from qwen_agentworld.llm_clients.teacher_claude import TeacherClient
 from qwen_agentworld.optimizer import build_optimizer
 from qwen_agentworld.orchestrator import loop as loop_module
+from qwen_agentworld.playbook_store.leak_audit import forbidden_terms_from_tools
+from qwen_agentworld.orchestrator.loop import stop_criterion
+from qwen_agentworld.orchestrator.validation import validate_and_maybe_rollback
 from qwen_agentworld.playbook_store.store import PlaybookStore
+from qwen_agentworld.teacher.task_bank import TaskBank
 from qwen_agentworld.core.schemas import Playbook
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -127,13 +131,41 @@ def run(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("building clients: teacher=Claude(AUTODL), simulator=Claude(AUTODL, temp), agent=%s", args.agent_model)
     teacher = TeacherClient()
     simulator = TemporarySimulatorClient()
     agent = AgentClient(model=args.agent_model)
+    # Logged after construction: every role's model is env-configurable
+    # (--agent-model defaults to None so $AGENT_MODEL wins), so only the
+    # constructed client knows what actually resolved.
+    logger.info(
+        "building clients: teacher=%s, simulator=%s(temp), agent=%s",
+        teacher.model,
+        simulator.model,
+        agent.model,
+    )
 
-    playbook_store = PlaybookStore()
+    # Arm the leak audit: a module that names a tool it was evolved on is
+    # memorisation, not a transferable meta-skill, and must not be stored.
+    playbook_store = PlaybookStore(forbidden_terms=forbidden_terms_from_tools(NOTES_TOOLS))
     playbook_store.seed(Playbook(version=1))
+
+    # Held-out tasks for validation. Drawn from the bank's eval split so they are
+    # never the tasks the playbook was evolved on: scoring a playbook on the
+    # rollouts that produced it measures memorisation, not utility.
+    heldout_tasks = (
+        TaskBank(args.bank_dir).draw(
+            TOOL_FAMILY, args.graph_complexity, args.validation_tasks, split="val"
+        )
+        if args.validation_tasks > 0
+        else []
+    )
+    if args.validation_tasks > 0 and not heldout_tasks:
+        logger.warning(
+            "no eval-split tasks in the bank for %s/gc%d — running without validation, "
+            "so no mutation can be rejected",
+            TOOL_FAMILY,
+            args.graph_complexity,
+        )
     tracker = RollingPassRateTracker()
     gate = EvidenceGate()
     optimizer = build_optimizer(teacher)  # U1 default: TextGrad
@@ -142,13 +174,13 @@ def run(args: argparse.Namespace) -> None:
         tool_family=TOOL_FAMILY,
         tasks_per_iteration=args.tasks_per_iteration,
         graph_complexity=args.graph_complexity,
-        min_graph_complexity=2,
-        max_graph_complexity=min(4, len(NOTES_TOOLS)),
     )
 
     run_summary = {
         "started_at": time.time(),
-        "agent_model": args.agent_model,
+        "teacher_model": teacher.model,
+        "simulator_model": simulator.model,
+        "agent_model": agent.model,
         "iterations_requested": args.iterations,
         "iterations_completed": 0,
         "iteration_errors": [],
@@ -167,8 +199,13 @@ def run(args: argparse.Namespace) -> None:
             captured_trajectories[task.task_id] = (trajectory, final_state)
             return trajectory, final_state
 
-        def _wrapped_diagnose(teacher_, trajectory, checker_passed, _orig=orig_diagnose):
-            diagnosis = _orig(teacher_, trajectory, checker_passed)
+        # Signature must track `loop._process_task`'s call, which passes the
+        # current playbook so the teacher can credit/retire existing entries.
+        # A stale signature here does not fail loudly: the TypeError is caught
+        # by run_iteration's per-task guard, every task is silently skipped,
+        # and the run finishes reporting zero playbook edits.
+        def _wrapped_diagnose(teacher_, trajectory, checker_passed, playbook=None, _orig=orig_diagnose, **kwargs):
+            diagnosis = _orig(teacher_, trajectory, checker_passed, playbook=playbook, **kwargs)
             captured_diagnoses.append((trajectory.task_id, diagnosis))
             return diagnosis
 
@@ -205,7 +242,20 @@ def run(args: argparse.Namespace) -> None:
         for task in tasks:
             entry = captured_trajectories.get(task.task_id)
             trajectory, final_state = entry if entry else (None, None)
-            checker_passed = judge_checker(task.checker, final_state) if final_state is not None else None
+            # Rebuild the same ordered state list `loop._process_task` used, or a
+            # step-wise checker silently falls back to the end-state predicate
+            # and every reversible task gets persisted as a failure.
+            states = (
+                [task.initial_state]
+                + [(s.simulator_raw_output or {}).get("next_state", {}) for s in trajectory.steps]
+                if trajectory is not None
+                else None
+            )
+            checker_passed = (
+                judge_checker(task.checker, final_state, states=states, task_id=task.task_id)
+                if final_state is not None
+                else None
+            )
             diagnosis = diagnosis_by_task.get(task.task_id)
             task_records.append(
                 {
@@ -249,6 +299,41 @@ def run(args: argparse.Namespace) -> None:
         logger.info("wrote %s", out_path)
         run_summary["iterations_completed"] += 1
 
+        # U7: score the (possibly just-mutated) playbook on held-out tasks and
+        # revert if it regressed. Without this the loop accepts every proposal
+        # unconditionally — a harmful edit is indistinguishable from a good one.
+        if heldout_tasks:
+            result, rolled_back = validate_and_maybe_rollback(
+                playbook_store,
+                agent,
+                simulator,
+                NOTES_TOOLS,
+                heldout_tasks,
+                reps=args.validation_reps,
+                tolerance=args.validation_tolerance,
+            )
+            logger.info(
+                "validation: utility=%.3f (%d/%d, %d errored) rolled_back=%s",
+                result.utility,
+                result.n_passed,
+                result.n_rollouts,
+                result.n_errored,
+                rolled_back,
+            )
+            iteration_record["validation"] = {
+                "utility": result.utility,
+                "n_passed": result.n_passed,
+                "n_rollouts": result.n_rollouts,
+                "n_errored": result.n_errored,
+                "rolled_back": rolled_back,
+            }
+            out_path.write_text(json.dumps(iteration_record, indent=2, ensure_ascii=False))
+
+            if stop_criterion(playbook_store.history):
+                logger.info("stop criterion fired: validation utility stopped improving")
+                run_summary["stopped_early"] = True
+                break
+
     run_summary["finished_at"] = time.time()
     run_summary["playbook_history_versions"] = [p.version for p in playbook_store.history]
     (output_dir / "summary.json").write_text(json.dumps(run_summary, indent=2, ensure_ascii=False))
@@ -260,6 +345,21 @@ if __name__ == "__main__":
     parser.add_argument("--iterations", type=int, default=2)
     parser.add_argument("--tasks-per-iteration", type=int, default=2)
     parser.add_argument("--graph-complexity", type=int, default=2)
-    parser.add_argument("--agent-model", default="Qwen3-14B")
+    # None -> AgentClient falls back to $AGENT_MODEL, then to Qwen3-8B.
+    parser.add_argument("--agent-model", default=None)
     parser.add_argument("--output-dir", default="smoke_test_results/run1")
+    parser.add_argument(
+        "--validation-tasks",
+        type=int,
+        default=0,
+        help="held-out eval-split tasks to score the playbook on each iteration (0 = off)",
+    )
+    parser.add_argument("--validation-reps", type=int, default=1)
+    parser.add_argument(
+        "--validation-tolerance",
+        type=float,
+        default=0.1,
+        help="regression absorbed before rolling back; 0 reverts on sampling noise alone",
+    )
+    parser.add_argument("--bank-dir", default="task_bank")
     run(parser.parse_args())

@@ -1,0 +1,45 @@
+# Runtime dependencies. Install into a dedicated env, e.g.
+#   python -m venv <env> && source <env>/bin/activate && pip install -r requirements.txt
+#
+# vLLM is pinned because it drags in torch: 0.25.1 pulls torch 2.11.0+cu130,
+# which is what a Blackwell (sm_120) card needs. Older vLLM pins predate
+# Qwen3.5-MoE support and fail to load Qwen-AgentWorld-35B-A3B.
+vllm==0.25.1
+
+# CUDA toolchain. vLLM only pins nvidia-cuda-runtime (13.0.x) and leaves the
+# compiler subpackages floating, which resolves to 13.2/13.3 and breaks the
+# flashinfer JIT path two different ways: "CUDA compiler and CUDA toolkit
+# headers are incompatible" (nvcc vs cccl), then "Unsupported .version 9.2;
+# current version is 9.0" (cicc emits PTX 9.2, ptxas is 9.0). Keep every
+# component on 13.0.
+nvidia-cuda-nvcc==13.0.88
+nvidia-nvvm==13.0.88
+nvidia-cuda-crt==13.0.88
+nvidia-cuda-cccl==13.0.85
+
+# Prebuilt sm_120 kernels: flashinfer-jit-cache==0.6.13+cu130. Without it,
+# flashinfer JIT-compiles the cutlass fused-MoE kernel on first Simulator
+# startup -- 97 nvcc translation units, well over an hour on this box.
+#
+# Not installable from here: it is a 1.4GB GitHub release asset, not a PyPI
+# package, and `pip --index-url https://flashinfer.ai/whl/cu130/` dies partway
+# with IncompleteRead. Use the helper instead, which mirrors, resumes, and
+# verifies the archive before installing:
+#   bash /root/autodl-tmp/fetch_flashinfer.sh
+# The version must match the flashinfer-python that vLLM pulls in (0.6.13);
+# flashinfer checks this at import and refuses to start on a mismatch.
+
+openai
+httpx
+pydantic
+jinja2
+jsonschema
+python-dotenv
+
+# Tests
+pytest
+pytest-asyncio
+
+# Checkpoint download
+modelscope
+huggingface_hub

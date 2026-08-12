@@ -89,3 +89,21 @@ def test_is_trivial_tautology_false_for_real_predicate():
 def test_validate_rejects_constant_predicate():
     with pytest.raises(UnsafePredicateError):
         validate_predicate_ast("1 == 1")
+
+
+def test_state_is_visible_inside_a_comprehension_body():
+    """A comprehension body runs in its own scope. If `state` is passed as
+    eval()'s locals rather than its globals, referencing it inside the body
+    (as opposed to in the outer iterable) raises NameError -- a crash, not a
+    False, so it escapes judge_checker's UnsafePredicateError handler and takes
+    the whole run down. Seen live once the teacher model changed.
+    """
+    state = {"items": [{"owner": "u1"}, {"owner": "u2"}], "target": "u2"}
+    predicate = "any(item['owner'] == state['target'] for item in state['items'])"
+    assert evaluate_predicate(predicate, state) is True
+
+
+def test_states_is_visible_inside_a_comprehension_body():
+    states = [{"n": 0}, {"n": 1}, {"n": 0}]
+    predicate = "any(s['n'] == states[1]['n'] for s in states)"
+    assert evaluate_step_wise_predicate(predicate, states) is True

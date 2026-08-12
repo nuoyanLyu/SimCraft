@@ -14,8 +14,11 @@ parameter vocabularies** (no shared tool names, no shared parameter keys), so
 `tools/family_split.assert_family_isolation` is clean for *any* pair of
 domains chosen as train vs. eval. `initial_state` is not defined here — it is
 synthesized per task by `teacher/task_generator.instantiate_nl_and_state`
-from the tool graph; `FAMILY_STATE_HINTS` documents the canonical-state shape
-each domain operates over, for callers that want to seed or validate it.
+from the tool graph, against the family's declared schema in
+`tools/state_schema.py` — that module owns the canonical-state shape and is
+the single description shown to the teacher, shown to the simulator, and used
+to audit both. (It replaced a prose `FAMILY_STATE_HINTS` dict here that no
+model was ever shown; see its docstring for what that cost.)
 """
 
 from __future__ import annotations
@@ -113,18 +116,25 @@ ALL_FAMILIES: dict[str, list[ToolSpec]] = {
     _SWE: CODE_REPO_TOOLS,
 }
 
-# Canonical-state shape each domain operates over (teacher seeds the concrete
-# instance; this documents the *shape* for seeding/validation/eval wiring).
-FAMILY_STATE_HINTS: dict[str, str] = {
-    _MCP: 'collections: name -> list of records, each with record_id plus fields',
-    _TERM: 'cwd plus filesystem: path -> file text (or a directory marker)',
-    _SEARCH: 'last_results: ranked stubs; notebook: list of saved notes (headline, body)',
-    _SWE: 'repo: module -> source; branch; last_test_run: passed/failed counts',
-}
-
 # Convenience defaults aligned with data/paper-story1.md + evaluation-benchmarks.md.
 DEFAULT_TRAINING_FAMILIES: tuple[str, ...] = (_MCP, _TERM, _SWE)
 DEFAULT_HELDOUT_FAMILY: str = _SEARCH
+
+
+# Tools that irreversibly destroy pre-existing data. They stay in every agent's
+# tool list -- refusing to reach for them unprompted is a real capability -- but
+# tasks are never *built* around them: a task bank full of "delete X then create
+# Y" both rewards destructive behaviour and puts the generated playbook at war
+# with itself (the evolved precondition_check module learned to refuse deletions
+# outright, which then depressed the pass rate on exactly those tasks).
+DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
+    {"delete_record", "remove_path", "delete_note"}  # delete_note: the mcp_notes toy family in scripts/
+)
+
+
+def non_destructive(tools: list[ToolSpec]) -> list[ToolSpec]:
+    """`tools` minus anything in `DESTRUCTIVE_TOOLS`."""
+    return [t for t in tools if t.name not in DESTRUCTIVE_TOOLS]
 
 
 def family_names() -> list[str]:

@@ -1,20 +1,13 @@
 import pytest
 
-from qwen_agentworld.core.schemas import ParetoScores, Playbook, PlaybookCategory, PlaybookModule
+from qwen_agentworld.core.schemas import ParetoScores, Playbook, PlaybookEntry
 from qwen_agentworld.playbook_store.store import LeakageDetectedError, PlaybookStore, dominates
 
 
-def module(coverage, audit, compactness, content="generic advice"):
-    return PlaybookModule(
-        category=PlaybookCategory.SCHEMA_GROUNDING,
-        content=content,
-        pareto_scores=ParetoScores(task_coverage=coverage, audit_acceptance=audit, compactness=compactness),
-    )
-
-
-def playbook(coverage, audit, compactness, validation_utility=None):
+def playbook(coverage, audit, compactness, validation_utility=None, content="generic advice"):
     return Playbook(
-        modules={PlaybookCategory.SCHEMA_GROUNDING: module(coverage, audit, compactness)},
+        entries=[PlaybookEntry(tag="schema-grounding", content=content)],
+        pareto_scores=ParetoScores(task_coverage=coverage, audit_acceptance=audit, compactness=compactness),
         validation_utility=validation_utility,
     )
 
@@ -34,8 +27,7 @@ def test_current_raises_when_empty():
 
 def test_update_refuses_leaked_content():
     store = PlaybookStore(forbidden_terms={"search_docs"})
-    leaked = playbook(0.5, 0.5, 0.5)
-    leaked.modules[PlaybookCategory.SCHEMA_GROUNDING].content = "Retry search_docs with broader terms."
+    leaked = playbook(0.5, 0.5, 0.5, content="Retry search_docs with broader terms.")
     with pytest.raises(LeakageDetectedError):
         store.update(leaked)
 
@@ -59,7 +51,7 @@ def test_frontier_keeps_only_non_dominated_candidates():
     store.seed(playbook(0.5, 0.5, 0.5))
     store.update(playbook(0.9, 0.9, 0.9))  # dominates the seed
     assert len(store.frontier) == 1
-    assert store.frontier[0].modules[PlaybookCategory.SCHEMA_GROUNDING].pareto_scores.task_coverage == 0.9
+    assert store.frontier[0].pareto_scores.task_coverage == 0.9
 
     store.update(playbook(0.1, 0.95, 0.5))  # higher on audit_acceptance, lower elsewhere -> incomparable
     assert len(store.frontier) == 2

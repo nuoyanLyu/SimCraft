@@ -126,10 +126,12 @@ def validate_predicate_ast(
 
 def evaluate_predicate(predicate: str, state: dict[str, Any]) -> bool:
     validate_predicate_ast(predicate)
+    # `state` goes in globals, not locals: a comprehension body runs in its own
+    # scope that sees globals but not eval()'s locals dict, so a predicate
+    # referencing `state` inside `any(... for ... in ...)` would raise NameError.
     result = eval(  # noqa: S307 — validated to a restricted AST allowlist above
         compile(predicate, "<checker>", mode="eval"),
-        {"__builtins__": {}} | _SAFE_BUILTINS,
-        {"state": state},
+        {"__builtins__": {}} | _SAFE_BUILTINS | {"state": state},
     )
     return bool(result)
 
@@ -141,10 +143,10 @@ def evaluate_step_wise_predicate(predicate: str, states: list[dict[str, Any]]) -
     end-state predicate cannot tell real work-then-revert from a no-op.
     """
     validate_predicate_ast(predicate, root_names=frozenset({"states"}))
+    # `states` in globals for the same comprehension-scope reason as above.
     result = eval(  # noqa: S307 — validated to a restricted AST allowlist above
         compile(predicate, "<step-checker>", mode="eval"),
-        {"__builtins__": {}} | _SAFE_BUILTINS,
-        {"states": states},
+        {"__builtins__": {}} | _SAFE_BUILTINS | {"states": states},
     )
     return bool(result)
 

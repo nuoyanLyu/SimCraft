@@ -41,6 +41,7 @@ logs/
 data/
 abtest/
 smoke_test_results/
+studies/
 scripts/gpu*_run_logs/
 scripts/real_sim_logs/
 outputs/
@@ -56,3 +57,27 @@ checkpoints/
 .agents/
 .claude/
 skills-lock.json
+
+# Ported benchmark harness (from 79:~/EnvFactory/scripts/eval + the official
+# harness repos). The scripts themselves ARE tracked -- otherwise they exist
+# only on the eval box and losing the instance loses them. What stays out:
+#   - every *.env, already covered by the repo-wide rule at the top of this
+#     file. Those are the files that hold, or are meant to hold, live
+#     third-party API keys (mcp_atlas/keys.env is the one with real ones).
+#     Only their *.env.template siblings are tracked -- copy a template and
+#     fill it in locally. Never put a key in a script or a README instead.
+#   - RESULTS.md / VERIFICATION.md, via the repo-wide *.md rule. They are the
+#     79 box own eval records, so they stay local by that policy.
+#   - benchmark repos and run outputs, which live outside the tree entirely
+#     (/root/autodl-tmp/dataset/agent, /root/autodl-tmp/eval_runs).
+# If a key ever does land in a commit, rotate it -- scrubbing history is not
+# enough once it has been pushed, and origin here is a public repo.
+
+# Generated task bank: teacher output cached to avoid re-paying for identical
+# tasks. Reproducible from the teacher, large, and churns constantly.
+task_bank/
+task_bank_schema_v1/
+
+task_bank_pre0729_fixes/
+*.md.bak*
+thr.py

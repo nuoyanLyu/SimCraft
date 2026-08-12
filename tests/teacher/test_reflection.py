@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from qwen_agentworld.core.schemas import PlaybookCategory, Step, ToolCall, Trajectory
+from qwen_agentworld.core.schemas import Step, ToolCall, Trajectory
 from qwen_agentworld.llm_clients.base import ChatResult
 from qwen_agentworld.teacher.reflection import diagnose
 
@@ -27,13 +27,13 @@ def test_diagnose_parses_reply_into_diagnosis():
                         "step_id": "s1",
                         "verdict": "correct",
                         "feedback": "found the right doc",
-                        "suggested_category": None,
+                        "suggested_tag": None,
                     },
                     {
                         "step_id": "s2",
                         "verdict": "erroneous",
                         "feedback": "missing required argument",
-                        "suggested_category": "schema_grounding",
+                        "suggested_tag": "Schema Grounding",
                     },
                 ],
             }
@@ -45,8 +45,8 @@ def test_diagnose_parses_reply_into_diagnosis():
     assert diagnosis.task_id == "task_x"
     assert diagnosis.overall_verdict == "partial"
     assert len(diagnosis.step_diagnoses) == 2
-    assert diagnosis.step_diagnoses[1].suggested_category == PlaybookCategory.SCHEMA_GROUNDING
-    assert diagnosis.step_diagnoses[0].suggested_category is None
+    assert diagnosis.step_diagnoses[1].suggested_tag == "schema-grounding"
+    assert diagnosis.step_diagnoses[0].suggested_tag is None
 
 
 def test_diagnose_retries_on_truncated_content_then_succeeds():
